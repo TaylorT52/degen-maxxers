@@ -5,13 +5,12 @@ This app now uses Firebase Authentication and Cloud Firestore so entries, rating
 ## What to configure
 
 1. Create a Firebase project and register a web app.
-2. Enable `Authentication > Sign-in method > Phone`.
-3. Set an SMS region policy in `Authentication > Settings`.
-4. If you test locally and your Firebase project was created after April 28, 2025, add `localhost` as an authorized domain.
-5. Upgrade the Firebase project to the Blaze plan before testing real phone SMS login. Firebase documents phone-auth verification SMS as Blaze-only.
-6. Create a Cloud Firestore database in production or test mode.
-7. Replace the Firestore rules with the contents of [firestore.rules](/Users/taylortam/Downloads/code/degen-maxxers/firestore.rules:1).
-8. Fill in the Firebase web config values in [config.js](/Users/taylortam/Downloads/code/degen-maxxers/config.js:1).
+2. Enable `Authentication > Sign-in method > Google`.
+3. Add `localhost` to `Authentication > Settings > Authorized domains` for local testing.
+4. Later, add your GitHub Pages domain in that same Authorized domains list.
+5. Create a Cloud Firestore database in production or test mode.
+6. Replace the Firestore rules with the contents of [firestore.rules](/Users/taylortam/Downloads/code/degen-maxxers/firestore.rules:1).
+7. Fill in the Firebase web config values in [config.js](/Users/taylortam/Downloads/code/degen-maxxers/config.js:1).
 
 ## Firestore collections used by the app
 
@@ -24,7 +23,7 @@ This app now uses Firebase Authentication and Cloud Firestore so entries, rating
 ### `users/{uid}`
 
 - `uid`
-- `phoneNumber`
+- `authDisplayName`
 - `nickname`
 - `color`
 - `createdAt`
@@ -33,7 +32,6 @@ This app now uses Firebase Authentication and Cloud Firestore so entries, rating
 ### `entries/{uid_YYYY-MM-DD}`
 
 - `ownerUid`
-- `ownerPhoneNumber`
 - `ownerColor`
 - `date`
 - `selfScore`
@@ -54,5 +52,5 @@ This app now uses Firebase Authentication and Cloud Firestore so entries, rating
 ## Notes
 
 - Firebase web config values are meant to be used in frontend code; they are not private secrets.
-- For low-cost testing, Firebase lets you configure fictional phone numbers in Authentication so you can verify the login flow without sending real SMS messages.
-- When you later publish on GitHub Pages, add that Pages domain to Firebase Authentication authorized domains too.
+- Google sign-in does not require Firebase SMS billing.
+- If popup sign-in is blocked on mobile or by the browser, the app falls back to redirect-style Google sign-in.

@@ -18,7 +18,7 @@
         <p class="eyebrow">Behavior board</p>
         <h1>How Degen Were We?</h1>
         <p class="hero-copy">
-          Real phone sign-in, five-bullet daily recaps, and shared ratings that
+          Real Google sign-in, five-bullet daily recaps, and shared ratings that
           persist across browsers once Firebase is connected.
         </p>
       </header>
@@ -27,80 +27,25 @@
         <section id="login-panel" class="panel auth-panel">
           <div class="panel-heading">
             <div>
-              <p class="panel-kicker">Phone sign-in</p>
-              <h2>Join with your phone number</h2>
+              <p class="panel-kicker">Google sign-in</p>
+              <h2>Join with your Google account</h2>
             </div>
           </div>
 
-          <form id="login-form" class="stack-form">
-            <label class="field">
-              <span>Phone number</span>
-              <input
-                id="phone-input"
-                name="phone"
-                type="tel"
-                inputmode="tel"
-                autocomplete="tel"
-                placeholder="(555) 123-4567"
-                required
-              />
-            </label>
-
-            <label class="field">
-              <span>Nickname (optional)</span>
-              <input
-                id="nickname-input"
-                name="nickname"
-                type="text"
-                autocomplete="nickname"
-                maxlength="32"
-                placeholder="Give yourself a name"
-              />
-            </label>
-
-            <button id="send-code-button" class="primary-button" type="submit">
-              Send verification code
+          <div class="stack-form">
+            <button id="google-signin-button" class="primary-button" type="button">
+              Continue with Google
             </button>
-          </form>
-
-          <div id="verification-step" class="verification-step" hidden>
-            <p class="helper-text">
-              We sent a six-digit code to your phone. Enter it below to finish
-              signing in.
-            </p>
-
-            <form id="verify-form" class="stack-form">
-              <label class="field">
-                <span>Verification code</span>
-                <input
-                  id="verification-code"
-                  name="verificationCode"
-                  type="text"
-                  inputmode="numeric"
-                  autocomplete="one-time-code"
-                  maxlength="6"
-                  placeholder="123456"
-                  required
-                />
-              </label>
-
-              <div class="auth-actions">
-                <button class="primary-button" type="submit">Verify and enter</button>
-                <button id="reset-login-button" class="ghost-button" type="button">
-                  Change number
-                </button>
-              </div>
-            </form>
           </div>
 
-          <div id="recaptcha-container" class="recaptcha-container"></div>
           <p id="auth-message" class="status-message" hidden></p>
           <p id="setup-notice" class="status-message" hidden></p>
 
           <p class="helper-text">
-            This version uses Firebase for real shared persistence, so other
-            people can sign in from their own browsers and rate the same entries.
+            Google sign-in avoids SMS billing and still gives the board real
+            shared persistence. Nicknames can be customized after sign-in.
           </p>
+          
         </section>
 
         <section id="dashboard" class="dashboard" hidden>
@@ -128,7 +73,7 @@
               </label>
 
               <button id="logout-button" class="ghost-button" type="button">
-                Switch phone number
+                Sign out
               </button>
             </div>
           </div>

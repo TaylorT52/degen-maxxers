@@ -2,7 +2,7 @@
 
 ## What it does
 
-- Sign in with a real phone number using Firebase Authentication
+- Sign in with Google using Firebase Authentication
 - Persist login sessions in the browser
 - Persist nicknames in Firestore
 - Pick a specific day
@@ -18,7 +18,7 @@
 
 This app now uses:
 
-- Firebase Authentication for phone sign-in
+- Firebase Authentication for Google sign-in
 - Cloud Firestore for shared persistence
 - Browser-local auth persistence for staying signed in
 

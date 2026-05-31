@@ -9,6 +9,10 @@ service cloud.firestore {
       return score is int && score >= 1 && score <= 5;
     }
 
+    function validDate(date) {
+      return date is string && date.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
     function validBullets(bullets) {
       return bullets is list
         && bullets.size() == 5
@@ -19,8 +23,20 @@ service cloud.firestore {
         && bullets[4] is string && bullets[4].size() > 0 && bullets[4].size() <= 180;
     }
 
+    function validProfileString(value, maxLength) {
+      return value is string && value.size() <= maxLength;
+    }
+
+    function entryPath(entryId) {
+      return /databases/$(database)/documents/entries/$(entryId);
+    }
+
+    function entryExists(entryId) {
+      return exists(entryPath(entryId));
+    }
+
     function entryDoc(entryId) {
-      return get(/databases/$(database)/documents/entries/$(entryId));
+      return get(entryPath(entryId));
     }
 
     match /users/{userId} {
@@ -29,16 +45,16 @@ service cloud.firestore {
       allow create: if signedIn()
         && userId == request.auth.uid
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.phoneNumber == request.auth.token.phone_number
-        && request.resource.data.nickname is string
-        && request.resource.data.color is string;
+        && validProfileString(request.resource.data.authDisplayName, 80)
+        && validProfileString(request.resource.data.nickname, 32)
+        && validProfileString(request.resource.data.color, 40);
 
       allow update: if signedIn()
         && userId == request.auth.uid
         && request.resource.data.uid == resource.data.uid
-        && request.resource.data.phoneNumber == resource.data.phoneNumber
-        && request.resource.data.color == resource.data.color
-        && request.resource.data.nickname is string;
+        && validProfileString(request.resource.data.authDisplayName, 80)
+        && validProfileString(request.resource.data.nickname, 32)
+        && validProfileString(request.resource.data.color, 40);
 
       allow delete: if false;
     }
@@ -48,17 +64,17 @@ service cloud.firestore {
 
       allow create: if signedIn()
         && request.resource.data.ownerUid == request.auth.uid
-        && request.resource.data.ownerPhoneNumber == request.auth.token.phone_number
-        && request.resource.data.date is string
-        && request.resource.data.ownerColor is string
+        && validDate(request.resource.data.date)
+        && entryId == request.auth.uid + "_" + request.resource.data.date
+        && validProfileString(request.resource.data.ownerColor, 40)
         && validScore(request.resource.data.selfScore)
         && validBullets(request.resource.data.bullets);
 
       allow update: if signedIn()
         && resource.data.ownerUid == request.auth.uid
         && request.resource.data.ownerUid == resource.data.ownerUid
-        && request.resource.data.ownerPhoneNumber == resource.data.ownerPhoneNumber
         && request.resource.data.date == resource.data.date
+        && entryId == resource.data.ownerUid + "_" + resource.data.date
         && request.resource.data.ownerColor == resource.data.ownerColor
         && validScore(request.resource.data.selfScore)
         && validBullets(request.resource.data.bullets);
@@ -71,11 +87,12 @@ service cloud.firestore {
 
       allow create: if signedIn()
         && request.resource.data.raterUid == request.auth.uid
-        && request.resource.data.targetUid is string
-        && request.resource.data.entryId is string
-        && request.resource.data.date is string
         && request.resource.data.raterUid != request.resource.data.targetUid
+        && request.resource.data.entryId is string
+        && validDate(request.resource.data.date)
+        && ratingId == request.resource.data.entryId + "__" + request.auth.uid
         && validScore(request.resource.data.score)
+        && entryExists(request.resource.data.entryId)
         && entryDoc(request.resource.data.entryId).data.ownerUid == request.resource.data.targetUid
         && entryDoc(request.resource.data.entryId).data.date == request.resource.data.date;
 
@@ -85,8 +102,10 @@ service cloud.firestore {
         && request.resource.data.targetUid == resource.data.targetUid
         && request.resource.data.entryId == resource.data.entryId
         && request.resource.data.date == resource.data.date
+        && ratingId == resource.data.entryId + "__" + request.auth.uid
         && request.resource.data.raterUid != request.resource.data.targetUid
         && validScore(request.resource.data.score)
+        && entryExists(request.resource.data.entryId)
         && entryDoc(request.resource.data.entryId).data.ownerUid == request.resource.data.targetUid;
 
       allow delete: if false;

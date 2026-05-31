@@ -1,11 +1,13 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import {
-  RecaptchaVerifier,
   browserLocalPersistence,
   getAuth,
+  getRedirectResult,
+  GoogleAuthProvider,
   onAuthStateChanged,
   setPersistence,
-  signInWithPhoneNumber,
+  signInWithPopup,
+  signInWithRedirect,
   signOut,
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import {
@@ -57,17 +59,9 @@ const LEVELS = [
 const dom = {
   loginPanel: document.querySelector("#login-panel"),
   dashboard: document.querySelector("#dashboard"),
-  loginForm: document.querySelector("#login-form"),
-  phoneInput: document.querySelector("#phone-input"),
-  nicknameInput: document.querySelector("#nickname-input"),
-  sendCodeButton: document.querySelector("#send-code-button"),
-  verificationStep: document.querySelector("#verification-step"),
-  verifyForm: document.querySelector("#verify-form"),
-  verificationCodeInput: document.querySelector("#verification-code"),
-  resetLoginButton: document.querySelector("#reset-login-button"),
+  googleSignInButton: document.querySelector("#google-signin-button"),
   authMessage: document.querySelector("#auth-message"),
   setupNotice: document.querySelector("#setup-notice"),
-  recaptchaContainer: document.querySelector("#recaptcha-container"),
   selectedDate: document.querySelector("#selected-date"),
   sessionBadge: document.querySelector("#session-badge"),
   profileNicknameInput: document.querySelector("#profile-nickname"),
@@ -91,11 +85,6 @@ const state = {
   ratings: {},
   authNotice: null,
   dashboardNotice: null,
-  confirmationResult: null,
-  pendingPhoneNumber: "",
-  pendingNickname: "",
-  recaptchaVerifier: null,
-  recaptchaWidgetId: null,
   entryFormDirty: false,
   lastEntryFormKey: "",
   listeners: {
@@ -117,7 +106,7 @@ async function bootstrap() {
   const firebaseConfig = getFirebaseConfig();
   if (!firebaseConfig) {
     state.setupError =
-      "Firebase is not configured yet. Add your real project values in config.js to enable shared sign-in and shared ratings.";
+      "Firebase is not configured yet. Add your real project values in config.js to enable Google sign-in and shared ratings.";
     render();
     return;
   }
@@ -144,7 +133,7 @@ async function bootstrap() {
       }
 
       try {
-        await ensureUserProfile(user, state.pendingNickname);
+        await ensureUserProfile(user);
       } catch (error) {
         state.dashboardNotice = {
           tone: "error",
@@ -154,15 +143,20 @@ async function bootstrap() {
 
       subscribeToUsers();
       subscribeToSelectedDate();
-
-      state.confirmationResult = null;
-      state.pendingPhoneNumber = "";
-      state.pendingNickname = "";
       state.authNotice = null;
-      dom.loginForm.reset();
-      dom.verifyForm.reset();
       render();
     });
+
+    try {
+      await getRedirectResult(auth);
+    } catch (error) {
+      state.authReady = true;
+      state.authNotice = {
+        tone: "error",
+        text: friendlyErrorMessage(error),
+      };
+      render();
+    }
   } catch (error) {
     state.setupError = friendlyErrorMessage(error);
     state.authReady = true;
@@ -172,9 +166,7 @@ async function bootstrap() {
 }
 
 function bindEvents() {
-  dom.loginForm.addEventListener("submit", handleSendCode);
-  dom.verifyForm.addEventListener("submit", handleVerifyCode);
-  dom.resetLoginButton.addEventListener("click", resetLoginFlow);
+  dom.googleSignInButton.addEventListener("click", handleGoogleSignIn);
   dom.logoutButton.addEventListener("click", handleLogout);
   dom.selectedDate.addEventListener("change", handleDateChange);
   dom.saveProfileButton.addEventListener("click", handleSaveProfile);
@@ -183,90 +175,41 @@ function bindEvents() {
   dom.entriesList.addEventListener("click", handleRateEntry);
 }
 
-async function handleSendCode(event) {
-  event.preventDefault();
-
+async function handleGoogleSignIn() {
   if (!auth) {
     return;
   }
 
-  const phoneNumber = normalizePhoneForSms(dom.phoneInput.value);
-  const nickname = dom.nicknameInput.value.trim();
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
 
-  if (!phoneNumber) {
-    dom.phoneInput.setCustomValidity("Use a valid phone number, like (555) 123-4567.");
-    dom.phoneInput.reportValidity();
-    return;
-  }
-
-  dom.phoneInput.setCustomValidity("");
-  state.authNotice = { tone: "info", text: "Sending a verification code..." };
+  state.authNotice = { tone: "info", text: "Opening Google sign-in..." };
   render();
 
   try {
-    const verifier = await ensureRecaptcha();
-    state.confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, verifier);
-    state.pendingPhoneNumber = phoneNumber;
-    state.pendingNickname = nickname;
-    state.authNotice = {
-      tone: "success",
-      text: `Code sent to ${formatPhone(phoneNumber)}. Enter the six-digit code below.`,
-    };
-    render();
-    dom.verificationCodeInput.focus();
+    if (shouldUseRedirectSignIn()) {
+      await signInWithRedirect(auth, provider);
+      return;
+    }
+
+    await signInWithPopup(auth, provider);
   } catch (error) {
-    await resetRecaptcha();
+    if (error?.code === "auth/popup-blocked") {
+      state.authNotice = {
+        tone: "info",
+        text: "Popup blocked. Redirecting to Google sign-in instead...",
+      };
+      render();
+      await signInWithRedirect(auth, provider);
+      return;
+    }
+
     state.authNotice = {
       tone: "error",
       text: friendlyErrorMessage(error),
     };
     render();
   }
-}
-
-async function handleVerifyCode(event) {
-  event.preventDefault();
-
-  if (!state.confirmationResult) {
-    state.authNotice = {
-      tone: "error",
-      text: "Send a verification code first.",
-    };
-    render();
-    return;
-  }
-
-  const code = dom.verificationCodeInput.value.trim();
-  if (!/^\d{6}$/.test(code)) {
-    dom.verificationCodeInput.setCustomValidity("Enter the six-digit code from the text message.");
-    dom.verificationCodeInput.reportValidity();
-    return;
-  }
-
-  dom.verificationCodeInput.setCustomValidity("");
-  state.authNotice = { tone: "info", text: "Verifying your code..." };
-  render();
-
-  try {
-    const result = await state.confirmationResult.confirm(code);
-    await ensureUserProfile(result.user, state.pendingNickname);
-  } catch (error) {
-    state.authNotice = {
-      tone: "error",
-      text: friendlyErrorMessage(error),
-    };
-    render();
-  }
-}
-
-function resetLoginFlow() {
-  state.confirmationResult = null;
-  state.pendingPhoneNumber = "";
-  state.pendingNickname = dom.nicknameInput.value.trim();
-  dom.verifyForm.reset();
-  state.authNotice = null;
-  resetRecaptcha().catch(() => {});
-  render();
 }
 
 async function handleLogout() {
@@ -276,7 +219,10 @@ async function handleLogout() {
 
   try {
     await signOut(auth);
-    state.authNotice = { tone: "success", text: "Signed out. Use any phone number to sign back in." };
+    state.authNotice = {
+      tone: "success",
+      text: "Signed out. Use Google sign-in to come back.",
+    };
     render();
   } catch (error) {
     state.dashboardNotice = {
@@ -363,13 +309,12 @@ async function handleSaveEntry(event) {
   try {
     await setDoc(doc(db, "entries", entryId), {
       ownerUid: state.currentUser.uid,
-      ownerPhoneNumber: state.currentUser.phoneNumber || state.pendingPhoneNumber || "",
       date: state.selectedDate,
       selfScore,
       bullets,
+      ownerColor: profile.color,
       createdAt: existing?.createdAt || serverTimestamp(),
       updatedAt: serverTimestamp(),
-      ownerColor: profile.color,
     });
     state.entryFormDirty = false;
     state.dashboardNotice = { tone: "success", text: "Daily recap saved." };
@@ -420,39 +365,7 @@ async function handleRateEntry(event) {
   }
 }
 
-async function ensureRecaptcha() {
-  if (state.recaptchaVerifier) {
-    return state.recaptchaVerifier;
-  }
-
-  state.recaptchaVerifier = new RecaptchaVerifier(auth, "send-code-button", {
-    size: "invisible",
-    callback: () => {},
-    "expired-callback": () => {
-      state.authNotice = {
-        tone: "info",
-        text: "The verification challenge expired. Send a fresh code.",
-      };
-      render();
-    },
-  });
-
-  state.recaptchaWidgetId = await state.recaptchaVerifier.render();
-  return state.recaptchaVerifier;
-}
-
-async function resetRecaptcha() {
-  if (typeof state.recaptchaWidgetId === "number" && window.grecaptcha) {
-    window.grecaptcha.reset(state.recaptchaWidgetId);
-    return;
-  }
-
-  if (state.recaptchaVerifier) {
-    state.recaptchaWidgetId = await state.recaptchaVerifier.render();
-  }
-}
-
-async function ensureUserProfile(user, nicknameOverride = "") {
+async function ensureUserProfile(user) {
   if (!db || !user) {
     return null;
   }
@@ -460,14 +373,14 @@ async function ensureUserProfile(user, nicknameOverride = "") {
   const userRef = doc(db, "users", user.uid);
   const snapshot = await getDoc(userRef);
   const existing = snapshot.exists() ? snapshot.data() : null;
-  const nickname = nicknameOverride.trim() || existing?.nickname || "";
-  const phoneNumber = user.phoneNumber || existing?.phoneNumber || state.pendingPhoneNumber || "";
+  const authDisplayName = user.displayName || existing?.authDisplayName || "";
+  const nickname = existing?.nickname || "";
   const color = existing?.color || buildColorFromKey(user.uid);
 
   if (!existing) {
     await setDoc(userRef, {
       uid: user.uid,
-      phoneNumber,
+      authDisplayName,
       nickname,
       color,
       createdAt: serverTimestamp(),
@@ -477,13 +390,11 @@ async function ensureUserProfile(user, nicknameOverride = "") {
   }
 
   if (
-    existing.nickname !== nickname ||
-    existing.phoneNumber !== phoneNumber ||
+    existing.authDisplayName !== authDisplayName ||
     existing.color !== color
   ) {
     await updateDoc(userRef, {
-      nickname,
-      phoneNumber,
+      authDisplayName,
       color,
       updatedAt: serverTimestamp(),
     });
@@ -592,10 +503,6 @@ function render() {
 
   dom.loginPanel.hidden = loggedIn;
   dom.dashboard.hidden = !loggedIn;
-  dom.verificationStep.hidden = !state.confirmationResult;
-  dom.sendCodeButton.textContent = state.confirmationResult
-    ? "Send a new code"
-    : "Send verification code";
 
   setNotice(dom.authMessage, state.authNotice);
   setNotice(dom.dashboardMessage, state.dashboardNotice);
@@ -609,15 +516,7 @@ function render() {
         },
   );
 
-  setElementsDisabled(
-    [dom.phoneInput, dom.nicknameInput, dom.sendCodeButton],
-    !configured || !state.authReady,
-  );
-
-  setElementsDisabled(
-    [dom.verificationCodeInput, ...dom.verifyForm.querySelectorAll("button")],
-    !configured || !state.confirmationResult,
-  );
+  setElementsDisabled([dom.googleSignInButton], !configured || !state.authReady);
 
   if (!loggedIn) {
     return;
@@ -637,12 +536,14 @@ function render() {
 }
 
 function renderSessionBadge(profile) {
+  const subtitle = state.currentUser?.email || "Google account connected";
+
   dom.sessionBadge.innerHTML = `
     <div class="profile-chip">
       <span class="profile-swatch" style="background:${profile.color};"></span>
       <span class="profile-label">
         <span class="profile-name">${escapeHtml(displayName(profile))}</span>
-        <span class="profile-phone">${escapeHtml(formatPhone(profile.phoneNumber))}</span>
+        <span class="profile-phone">${escapeHtml(subtitle)}</span>
       </span>
     </div>
   `;
@@ -709,7 +610,7 @@ function renderChart() {
 
   const markers = entries
     .map((entry, index) => {
-      const profile = getUserProfile(entry.ownerUid, entry.ownerPhoneNumber, entry.ownerColor);
+      const profile = getUserProfile(entry.ownerUid);
       const average = getAverageScore(entry);
       const placement = levelForScore(average);
       const left = entries.length === 1 ? 50 : 10 + (index * 80) / (entries.length - 1);
@@ -763,7 +664,7 @@ function renderEntries() {
 
   dom.entriesList.innerHTML = entries
     .map((entry) => {
-      const profile = getUserProfile(entry.ownerUid, entry.ownerPhoneNumber, entry.ownerColor);
+      const profile = getUserProfile(entry.ownerUid);
       const average = getAverageScore(entry);
       const placement = levelForScore(average);
       const peerRatings = getRatingsForEntry(entry.id);
@@ -777,7 +678,7 @@ function renderEntries() {
               <span class="profile-swatch" style="background:${profile.color};"></span>
               <div>
                 <h3>${escapeHtml(displayName(profile))}</h3>
-                <div class="entry-phone">${escapeHtml(formatPhone(profile.phoneNumber))}</div>
+                <div class="entry-phone">${escapeHtml(entrySecondaryText(profile))}</div>
               </div>
             </div>
 
@@ -799,7 +700,7 @@ function renderEntries() {
 
           ${
             isOwnEntry
-              ? `<p class="owner-note">This is your entry. Other people rate it from their own verified login.</p>`
+              ? `<p class="owner-note">This is your entry. Other people rate it from their own Google login.</p>`
               : `
                 <div class="rating-panel">
                   <strong>Rate this day</strong>
@@ -845,24 +746,24 @@ function getCurrentProfile() {
     return {
       uid: "",
       nickname: "",
-      phoneNumber: "",
+      authDisplayName: "",
       color: buildColorFromKey("fallback"),
     };
   }
 
   return getUserProfile(
     state.currentUser.uid,
-    state.currentUser.phoneNumber || state.pendingPhoneNumber,
+    state.currentUser.displayName || "",
     buildColorFromKey(state.currentUser.uid),
   );
 }
 
-function getUserProfile(uid, phoneNumber = "", fallbackColor = "") {
+function getUserProfile(uid, fallbackDisplayName = "", fallbackColor = "") {
   return (
     state.users[uid] || {
       uid,
       nickname: "",
-      phoneNumber,
+      authDisplayName: fallbackDisplayName,
       color: fallbackColor || buildColorFromKey(uid),
     }
   );
@@ -875,12 +776,8 @@ function sortEntries(entries) {
       return scoreDifference;
     }
 
-    const leftName = displayName(
-      getUserProfile(left.ownerUid, left.ownerPhoneNumber, left.ownerColor),
-    );
-    const rightName = displayName(
-      getUserProfile(right.ownerUid, right.ownerPhoneNumber, right.ownerColor),
-    );
+    const leftName = displayName(getUserProfile(left.ownerUid));
+    const rightName = displayName(getUserProfile(right.ownerUid));
 
     return leftName.localeCompare(rightName);
   });
@@ -931,6 +828,10 @@ function setElementsDisabled(elements, disabled) {
   });
 }
 
+function shouldUseRedirectSignIn() {
+  return window.matchMedia("(max-width: 760px)").matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 function resetEntryDraft() {
   state.entryFormDirty = false;
   state.lastEntryFormKey = "";
@@ -959,49 +860,16 @@ function getFirebaseConfig() {
   return missingField ? null : config;
 }
 
-function normalizePhoneForSms(value) {
-  const raw = String(value || "").trim();
-  const digits = raw.replace(/\D/g, "");
-
-  if (raw.startsWith("+")) {
-    return digits.length >= 10 && digits.length <= 15 ? `+${digits}` : "";
-  }
-
-  if (digits.length === 10) {
-    return `+1${digits}`;
-  }
-
-  if (digits.length === 11 && digits.startsWith("1")) {
-    return `+${digits}`;
-  }
-
-  if (digits.length >= 10 && digits.length <= 15) {
-    return `+${digits}`;
-  }
-
-  return "";
-}
-
-function formatPhone(phoneNumber) {
-  const digits = String(phoneNumber || "").replace(/\D/g, "");
-
-  if (!digits) {
-    return "";
-  }
-
-  if (digits.length === 11 && digits.startsWith("1")) {
-    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
-  }
-
-  if (digits.length === 10) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-  }
-
-  return phoneNumber.startsWith("+") ? phoneNumber : `+${digits}`;
-}
-
 function displayName(profile) {
-  return profile.nickname || formatPhone(profile.phoneNumber);
+  return profile.nickname || profile.authDisplayName || "Board User";
+}
+
+function entrySecondaryText(profile) {
+  if (profile.nickname && profile.authDisplayName && profile.nickname !== profile.authDisplayName) {
+    return profile.authDisplayName;
+  }
+
+  return "Google sign-in";
 }
 
 function buildColorFromKey(key) {
@@ -1035,22 +903,18 @@ function friendlyErrorMessage(error) {
   const code = error?.code || "";
 
   switch (code) {
-    case "auth/invalid-phone-number":
-      return "That phone number format did not work. Use a real number like (555) 123-4567.";
-    case "auth/invalid-verification-code":
-      return "That verification code does not match. Check the SMS and try again.";
-    case "auth/missing-verification-code":
-      return "Enter the six-digit verification code from the text message.";
-    case "auth/code-expired":
-      return "That code expired. Send a fresh code and try again.";
+    case "auth/operation-not-allowed":
+      return "Google sign-in is not enabled in Firebase Authentication yet. Turn on the Google provider and save.";
+    case "auth/popup-blocked":
+      return "Your browser blocked the Google sign-in popup.";
+    case "auth/popup-closed-by-user":
+      return "Google sign-in was closed before it finished.";
+    case "auth/cancelled-popup-request":
+      return "Another Google sign-in request is already in progress.";
     case "auth/unauthorized-domain":
-      return "This site domain is not authorized in Firebase Auth yet. Add it in Authentication settings.";
-    case "auth/quota-exceeded":
-      return "Firebase blocked more verification texts for now. Phone auth SMS requires the Blaze plan and has quotas.";
-    case "auth/too-many-requests":
-      return "Too many attempts right now. Wait a bit and try again.";
+      return "This domain is not authorized in Firebase Auth yet. Add localhost and your GitHub Pages domain in Authentication settings.";
     case "permission-denied":
-      return "Firestore rejected that request. Deploy the included firestore.rules file before testing shared data.";
+      return "Firestore rejected that request. Publish the included firestore.rules file before testing shared data.";
     default:
       return error?.message || "Something went wrong. Try again.";
   }
