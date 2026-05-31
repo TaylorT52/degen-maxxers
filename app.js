@@ -846,29 +846,28 @@ function renderEntries() {
                 const assignedByMe = assignments.some(
                   (assignment) => assignment.assigneeUid === state.currentUser?.uid,
                 );
-                const metaText = assignedByMe
-                  ? "You assigned this tag."
-                  : `${escapeHtml(tag.caption)}`;
+                const metaText = assignedByMe ? "Assigned by you" : "Tap to assign";
                 const assignmentText = assignments.length
                   ? formatTagAssignmentCount(assignments.length)
                   : "No one has assigned this yet";
 
                 return `
-                  <button
-                    class="tag-button ${assignedByMe ? "is-active" : ""}"
-                    type="button"
-                    data-entry-id="${entry.id}"
-                    data-tag-key="${tag.key}"
-                    aria-pressed="${assignedByMe}"
-                  >
-                    <span class="tag-button-topline">
-                      <span class="tag-button-badge">${escapeHtml(tag.emoji || "🏷️")}</span>
-                      <span class="tag-button-impact">${formatSignedScore(tag.scoreDelta)}</span>
-                    </span>
-                    <span class="tag-button-title">${escapeHtml(tag.label)}</span>
+                  <div class="tag-option ${assignedByMe ? "is-active" : ""}">
+                    <button
+                      class="tag-button ${assignedByMe ? "is-active" : ""}"
+                      type="button"
+                      data-entry-id="${entry.id}"
+                      data-tag-key="${tag.key}"
+                      aria-pressed="${assignedByMe}"
+                      aria-label="${escapeHtml(tag.label)} ${formatCompactSignedScore(tag.scoreDelta)}"
+                      title="${escapeHtml(tag.caption)}"
+                    >
+                      <span class="tag-button-value">${formatCompactSignedScore(tag.scoreDelta)}</span>
+                    </button>
+                    <span class="tag-button-title">${escapeHtml(tag.shortLabel || tag.label)}</span>
                     <span class="tag-button-meta">${metaText}</span>
                     <span class="tag-button-count">${assignmentText}</span>
-                  </button>
+                  </div>
                 `;
               }).join("")}
             </div>
@@ -1079,6 +1078,14 @@ function formatDateLabel(date) {
 
 function formatSignedScore(score) {
   return `${score > 0 ? "+" : ""}${score.toFixed(2)}`;
+}
+
+function formatCompactSignedScore(score) {
+  const compactValue = Number.isInteger(score)
+    ? String(score)
+    : String(Number(score.toFixed(2)));
+
+  return `${score > 0 ? "+" : ""}${compactValue}`;
 }
 
 function formatTagAssignmentCount(count) {
