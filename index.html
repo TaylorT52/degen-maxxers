@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Behavior Chart</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Shrikhand&family=Special+Elite&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <p class="eyebrow">Behavior board</p>
+        <h1>How Degen Were We?</h1>
+      </header>
+
+      <main class="app-shell">
+        <section id="login-panel" class="panel auth-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Prototype sign-in</p>
+              <h2>Join with your phone number</h2>
+            </div>
+          </div>
+
+          <form id="login-form" class="stack-form">
+            <label class="field">
+              <span>Phone number</span>
+              <input
+                id="phone-input"
+                name="phone"
+                type="tel"
+                inputmode="tel"
+                autocomplete="tel"
+                placeholder="(555) 123-4567"
+                required
+              />
+            </label>
+
+            <label class="field">
+              <span>Nickname (optional)</span>
+              <input
+                id="nickname-input"
+                name="nickname"
+                type="text"
+                autocomplete="nickname"
+                maxlength="32"
+                placeholder="Give yourself a name"
+              />
+            </label>
+
+            <button class="primary-button" type="submit">Enter the board</button>
+          </form>
+
+          <p class="helper-text">
+            This version is fully static and saves data in the browser so the
+            flow works immediately on a GitHub Pages style site.
+          </p>
+        </section>
+
+        <section id="dashboard" class="dashboard" hidden>
+          <div class="panel topbar">
+            <div id="session-badge" class="session-badge"></div>
+
+            <div class="topbar-actions">
+              <label class="field compact-field">
+                <span>Viewing day</span>
+                <input id="selected-date" type="date" />
+              </label>
+
+              <button id="logout-button" class="ghost-button" type="button">
+                Switch phone number
+              </button>
+            </div>
+          </div>
+
+          <div class="dashboard-grid">
+            <section class="panel form-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="panel-kicker">Daily check-in</p>
+                  <h2>Your five-bullet recap</h2>
+                </div>
+              </div>
+
+              <form id="entry-form" class="stack-form">
+                <fieldset class="score-fieldset">
+                  <legend>How do you rank this day?</legend>
+
+                  <div class="score-grid">
+                    <label class="score-option score-5">
+                      <input type="radio" name="selfScore" value="5" required />
+                      <span>😇 Perfect Angel</span>
+                    </label>
+
+                    <label class="score-option score-4">
+                      <input type="radio" name="selfScore" value="4" />
+                      <span>💋 Good Girl</span>
+                    </label>
+
+                    <label class="score-option score-3">
+                      <input type="radio" name="selfScore" value="3" />
+                      <span>🙂 Make Better Choices</span>
+                    </label>
+
+                    <label class="score-option score-2">
+                      <input type="radio" name="selfScore" value="2" />
+                      <span>🧊 On Thin Ice</span>
+                    </label>
+
+                    <label class="score-option score-1">
+                      <input type="radio" name="selfScore" value="1" />
+                      <span>⛓️ Jail</span>
+                    </label>
+                  </div>
+                </fieldset>
+
+                <div class="bullet-grid">
+                  <label class="field">
+                    <span>Bullet 1</span>
+                    <textarea
+                      name="bullet1"
+                      rows="2"
+                      maxlength="180"
+                      placeholder="Start with the first thing that mattered."
+                      required
+                    ></textarea>
+                  </label>
+
+                  <label class="field">
+                    <span>Bullet 2</span>
+                    <textarea
+                      name="bullet2"
+                      rows="2"
+                      maxlength="180"
+                      placeholder="Keep it short and specific."
+                      required
+                    ></textarea>
+                  </label>
+
+                  <label class="field">
+                    <span>Bullet 3</span>
+                    <textarea
+                      name="bullet3"
+                      rows="2"
+                      maxlength="180"
+                      placeholder="What shaped the day?"
+                      required
+                    ></textarea>
+                  </label>
+
+                  <label class="field">
+                    <span>Bullet 4</span>
+                    <textarea
+                      name="bullet4"
+                      rows="2"
+                      maxlength="180"
+                      placeholder="What changed or escalated?"
+                      required
+                    ></textarea>
+                  </label>
+
+                  <label class="field">
+                    <span>Bullet 5</span>
+                    <textarea
+                      name="bullet5"
+                      rows="2"
+                      maxlength="180"
+                      placeholder="How did it end?"
+                      required
+                    ></textarea>
+                  </label>
+                </div>
+
+                <button class="primary-button" type="submit">
+                  Save daily recap
+                </button>
+              </form>
+            </section>
+
+            <section class="panel board-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="panel-kicker">Live chart</p>
+                  <h2>Average score placement</h2>
+                </div>
+              </div>
+
+              <div id="day-summary" class="day-summary"></div>
+              <div id="chart-board" class="chart-board"></div>
+            </section>
+          </div>
+
+          <section class="panel feed-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Peer reviews</p>
+                <h2>Read the five bullets and rate the day</h2>
+              </div>
+            </div>
+
+            <div id="entries-list" class="entries-list"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
