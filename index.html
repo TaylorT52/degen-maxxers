@@ -17,13 +17,17 @@
       <header class="hero">
         <p class="eyebrow">Behavior board</p>
         <h1>How Degen Were We?</h1>
+        <p class="hero-copy">
+          Real phone sign-in, five-bullet daily recaps, and shared ratings that
+          persist across browsers once Firebase is connected.
+        </p>
       </header>
 
       <main class="app-shell">
         <section id="login-panel" class="panel auth-panel">
           <div class="panel-heading">
             <div>
-              <p class="panel-kicker">Prototype sign-in</p>
+              <p class="panel-kicker">Phone sign-in</p>
               <h2>Join with your phone number</h2>
             </div>
           </div>
@@ -54,12 +58,48 @@
               />
             </label>
 
-            <button class="primary-button" type="submit">Enter the board</button>
+            <button id="send-code-button" class="primary-button" type="submit">
+              Send verification code
+            </button>
           </form>
 
+          <div id="verification-step" class="verification-step" hidden>
+            <p class="helper-text">
+              We sent a six-digit code to your phone. Enter it below to finish
+              signing in.
+            </p>
+
+            <form id="verify-form" class="stack-form">
+              <label class="field">
+                <span>Verification code</span>
+                <input
+                  id="verification-code"
+                  name="verificationCode"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="one-time-code"
+                  maxlength="6"
+                  placeholder="123456"
+                  required
+                />
+              </label>
+
+              <div class="auth-actions">
+                <button class="primary-button" type="submit">Verify and enter</button>
+                <button id="reset-login-button" class="ghost-button" type="button">
+                  Change number
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div id="recaptcha-container" class="recaptcha-container"></div>
+          <p id="auth-message" class="status-message" hidden></p>
+          <p id="setup-notice" class="status-message" hidden></p>
+
           <p class="helper-text">
-            This version is fully static and saves data in the browser so the
-            flow works immediately on a GitHub Pages style site.
+            This version uses Firebase for real shared persistence, so other
+            people can sign in from their own browsers and rate the same entries.
           </p>
         </section>
 
@@ -68,6 +108,20 @@
             <div id="session-badge" class="session-badge"></div>
 
             <div class="topbar-actions">
+              <label class="field compact-field">
+                <span>Nickname</span>
+                <input
+                  id="profile-nickname"
+                  type="text"
+                  maxlength="32"
+                  placeholder="Update your nickname"
+                />
+              </label>
+
+              <button id="save-profile-button" class="ghost-button" type="button">
+                Save nickname
+              </button>
+
               <label class="field compact-field">
                 <span>Viewing day</span>
                 <input id="selected-date" type="date" />
@@ -78,6 +132,8 @@
               </button>
             </div>
           </div>
+
+          <p id="dashboard-message" class="status-message" hidden></p>
 
           <div class="dashboard-grid">
             <section class="panel form-panel">
@@ -210,6 +266,7 @@
       </main>
     </div>
 
-    <script src="app.js"></script>
+    <script src="config.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

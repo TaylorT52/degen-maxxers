@@ -145,6 +145,10 @@ body::before {
   gap: 8px;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .field span,
 .score-fieldset legend {
   font-size: 0.94rem;
@@ -184,6 +188,48 @@ textarea {
   margin: 16px 0 0;
   color: var(--muted);
   line-height: 1.6;
+}
+
+.verification-step {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px dashed rgba(82, 45, 53, 0.14);
+}
+
+.auth-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.recaptcha-container {
+  min-height: 2px;
+}
+
+.status-message {
+  margin: 16px 0 0;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  line-height: 1.55;
+  font-weight: 600;
+  border: 1px solid rgba(82, 45, 53, 0.1);
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.status-message[data-tone="info"] {
+  color: #5c4950;
+}
+
+.status-message[data-tone="success"] {
+  color: #245c31;
+  background: rgba(233, 252, 238, 0.9);
+  border-color: rgba(79, 142, 93, 0.22);
+}
+
+.status-message[data-tone="error"] {
+  color: #8a2f14;
+  background: rgba(255, 237, 232, 0.94);
+  border-color: rgba(185, 68, 36, 0.24);
 }
 
 .primary-button,
@@ -246,6 +292,10 @@ textarea {
 
 .compact-field {
   min-width: 200px;
+}
+
+.compact-field input {
+  min-height: 48px;
 }
 
 .profile-chip {
@@ -657,6 +707,10 @@ textarea {
   .topbar-actions {
     align-items: stretch;
     width: 100%;
+  }
+
+  .auth-actions {
+    flex-direction: column;
   }
 
   .compact-field {

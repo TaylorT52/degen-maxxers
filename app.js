@@ -1,5 +1,25 @@
-const STORAGE_KEY = "behavior-chart-v1";
-const SESSION_KEY = "behavior-chart-session-phone";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import {
+  RecaptchaVerifier,
+  browserLocalPersistence,
+  getAuth,
+  onAuthStateChanged,
+  setPersistence,
+  signInWithPhoneNumber,
+  signOut,
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import {
+  collection,
+  doc,
+  getDoc,
+  getFirestore,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 
 const LEVELS = [
   {
@@ -18,7 +38,7 @@ const LEVELS = [
     score: 3,
     name: "Gouse at 5am",
     emoji: "🙂",
-    caption: "There have been worse decisions, there have been better. Needs a cleaner next round.",
+    caption: "There have been worse decisions, there have been better.",
   },
   {
     score: 2,
@@ -40,69 +60,277 @@ const dom = {
   loginForm: document.querySelector("#login-form"),
   phoneInput: document.querySelector("#phone-input"),
   nicknameInput: document.querySelector("#nickname-input"),
+  sendCodeButton: document.querySelector("#send-code-button"),
+  verificationStep: document.querySelector("#verification-step"),
+  verifyForm: document.querySelector("#verify-form"),
+  verificationCodeInput: document.querySelector("#verification-code"),
+  resetLoginButton: document.querySelector("#reset-login-button"),
+  authMessage: document.querySelector("#auth-message"),
+  setupNotice: document.querySelector("#setup-notice"),
+  recaptchaContainer: document.querySelector("#recaptcha-container"),
   selectedDate: document.querySelector("#selected-date"),
   sessionBadge: document.querySelector("#session-badge"),
+  profileNicknameInput: document.querySelector("#profile-nickname"),
+  saveProfileButton: document.querySelector("#save-profile-button"),
   logoutButton: document.querySelector("#logout-button"),
+  dashboardMessage: document.querySelector("#dashboard-message"),
   entryForm: document.querySelector("#entry-form"),
   daySummary: document.querySelector("#day-summary"),
   chartBoard: document.querySelector("#chart-board"),
   entriesList: document.querySelector("#entries-list"),
 };
 
-let state = loadState();
-let sessionPhone = window.localStorage.getItem(SESSION_KEY) || "";
-let selectedDate = todayString();
+const state = {
+  setupError: "",
+  authReady: false,
+  currentUser: null,
+  currentProfile: null,
+  selectedDate: todayString(),
+  users: {},
+  entries: {},
+  ratings: {},
+  authNotice: null,
+  dashboardNotice: null,
+  confirmationResult: null,
+  pendingPhoneNumber: "",
+  pendingNickname: "",
+  recaptchaVerifier: null,
+  recaptchaWidgetId: null,
+  entryFormDirty: false,
+  lastEntryFormKey: "",
+  listeners: {
+    users: null,
+    entries: null,
+    ratings: null,
+  },
+};
 
-initialize();
+let auth = null;
+let db = null;
 
-function initialize() {
-  dom.selectedDate.value = selectedDate;
+bootstrap();
 
-  dom.loginForm.addEventListener("submit", handleLogin);
-  dom.entryForm.addEventListener("submit", handleSaveEntry);
-  dom.logoutButton.addEventListener("click", handleLogout);
-  dom.selectedDate.addEventListener("change", handleDateChange);
-  dom.entriesList.addEventListener("click", handleRateEntry);
-  window.addEventListener("storage", handleStorageChange);
+async function bootstrap() {
+  dom.selectedDate.value = state.selectedDate;
+  bindEvents();
+
+  const firebaseConfig = getFirebaseConfig();
+  if (!firebaseConfig) {
+    state.setupError =
+      "Firebase is not configured yet. Add your real project values in config.js to enable shared sign-in and shared ratings.";
+    render();
+    return;
+  }
+
+  try {
+    const app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+
+    await setPersistence(auth, browserLocalPersistence);
+
+    onAuthStateChanged(auth, async (user) => {
+      state.authReady = true;
+      state.currentUser = user;
+      state.dashboardNotice = null;
+
+      if (!user) {
+        state.currentProfile = null;
+        state.users = {};
+        clearRealtimeSubscriptions();
+        resetEntryDraft();
+        render();
+        return;
+      }
+
+      try {
+        await ensureUserProfile(user, state.pendingNickname);
+      } catch (error) {
+        state.dashboardNotice = {
+          tone: "error",
+          text: friendlyErrorMessage(error),
+        };
+      }
+
+      subscribeToUsers();
+      subscribeToSelectedDate();
+
+      state.confirmationResult = null;
+      state.pendingPhoneNumber = "";
+      state.pendingNickname = "";
+      state.authNotice = null;
+      dom.loginForm.reset();
+      dom.verifyForm.reset();
+      render();
+    });
+  } catch (error) {
+    state.setupError = friendlyErrorMessage(error);
+    state.authReady = true;
+  }
 
   render();
 }
 
-function handleLogin(event) {
+function bindEvents() {
+  dom.loginForm.addEventListener("submit", handleSendCode);
+  dom.verifyForm.addEventListener("submit", handleVerifyCode);
+  dom.resetLoginButton.addEventListener("click", resetLoginFlow);
+  dom.logoutButton.addEventListener("click", handleLogout);
+  dom.selectedDate.addEventListener("change", handleDateChange);
+  dom.saveProfileButton.addEventListener("click", handleSaveProfile);
+  dom.entryForm.addEventListener("submit", handleSaveEntry);
+  dom.entryForm.addEventListener("input", handleEntryFormInput);
+  dom.entriesList.addEventListener("click", handleRateEntry);
+}
+
+async function handleSendCode(event) {
   event.preventDefault();
 
-  const phone = sanitizePhone(dom.phoneInput.value);
+  if (!auth) {
+    return;
+  }
+
+  const phoneNumber = normalizePhoneForSms(dom.phoneInput.value);
   const nickname = dom.nicknameInput.value.trim();
 
-  if (!isValidPhone(phone)) {
-    dom.phoneInput.setCustomValidity("Enter a real phone number with 10 to 15 digits.");
+  if (!phoneNumber) {
+    dom.phoneInput.setCustomValidity("Use a valid phone number, like (555) 123-4567.");
     dom.phoneInput.reportValidity();
     return;
   }
 
   dom.phoneInput.setCustomValidity("");
-  ensureUser(phone, nickname);
-  sessionPhone = phone;
-  window.localStorage.setItem(SESSION_KEY, sessionPhone);
-  dom.loginForm.reset();
+  state.authNotice = { tone: "info", text: "Sending a verification code..." };
+  render();
+
+  try {
+    const verifier = await ensureRecaptcha();
+    state.confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, verifier);
+    state.pendingPhoneNumber = phoneNumber;
+    state.pendingNickname = nickname;
+    state.authNotice = {
+      tone: "success",
+      text: `Code sent to ${formatPhone(phoneNumber)}. Enter the six-digit code below.`,
+    };
+    render();
+    dom.verificationCodeInput.focus();
+  } catch (error) {
+    await resetRecaptcha();
+    state.authNotice = {
+      tone: "error",
+      text: friendlyErrorMessage(error),
+    };
+    render();
+  }
+}
+
+async function handleVerifyCode(event) {
+  event.preventDefault();
+
+  if (!state.confirmationResult) {
+    state.authNotice = {
+      tone: "error",
+      text: "Send a verification code first.",
+    };
+    render();
+    return;
+  }
+
+  const code = dom.verificationCodeInput.value.trim();
+  if (!/^\d{6}$/.test(code)) {
+    dom.verificationCodeInput.setCustomValidity("Enter the six-digit code from the text message.");
+    dom.verificationCodeInput.reportValidity();
+    return;
+  }
+
+  dom.verificationCodeInput.setCustomValidity("");
+  state.authNotice = { tone: "info", text: "Verifying your code..." };
+  render();
+
+  try {
+    const result = await state.confirmationResult.confirm(code);
+    await ensureUserProfile(result.user, state.pendingNickname);
+  } catch (error) {
+    state.authNotice = {
+      tone: "error",
+      text: friendlyErrorMessage(error),
+    };
+    render();
+  }
+}
+
+function resetLoginFlow() {
+  state.confirmationResult = null;
+  state.pendingPhoneNumber = "";
+  state.pendingNickname = dom.nicknameInput.value.trim();
+  dom.verifyForm.reset();
+  state.authNotice = null;
+  resetRecaptcha().catch(() => {});
   render();
 }
 
-function handleLogout() {
-  sessionPhone = "";
-  window.localStorage.removeItem(SESSION_KEY);
-  render();
+async function handleLogout() {
+  if (!auth) {
+    return;
+  }
+
+  try {
+    await signOut(auth);
+    state.authNotice = { tone: "success", text: "Signed out. Use any phone number to sign back in." };
+    render();
+  } catch (error) {
+    state.dashboardNotice = {
+      tone: "error",
+      text: friendlyErrorMessage(error),
+    };
+    render();
+  }
 }
 
 function handleDateChange(event) {
-  selectedDate = event.target.value || todayString();
+  state.selectedDate = event.target.value || todayString();
+  resetEntryDraft();
+
+  if (state.currentUser) {
+    subscribeToSelectedDate();
+  }
+
   render();
 }
 
-function handleSaveEntry(event) {
+function handleEntryFormInput() {
+  state.entryFormDirty = true;
+}
+
+async function handleSaveProfile() {
+  if (!db || !state.currentUser) {
+    return;
+  }
+
+  const nickname = dom.profileNicknameInput.value.trim();
+  state.dashboardNotice = { tone: "info", text: "Saving nickname..." };
+  render();
+
+  try {
+    await updateDoc(doc(db, "users", state.currentUser.uid), {
+      nickname,
+      updatedAt: serverTimestamp(),
+    });
+    state.dashboardNotice = { tone: "success", text: "Nickname saved." };
+    render();
+  } catch (error) {
+    state.dashboardNotice = {
+      tone: "error",
+      text: friendlyErrorMessage(error),
+    };
+    render();
+  }
+}
+
+async function handleSaveEntry(event) {
   event.preventDefault();
 
-  if (!sessionPhone) {
+  if (!db || !state.currentUser) {
     return;
   }
 
@@ -117,101 +345,329 @@ function handleSaveEntry(event) {
   ].map((item) => String(item || "").trim());
 
   if (!selfScore || bullets.some((bullet) => !bullet)) {
+    state.dashboardNotice = {
+      tone: "error",
+      text: "Pick a score and fill out all five bullets before saving.",
+    };
+    render();
     return;
   }
 
-  const id = buildEntryId(sessionPhone, selectedDate);
-  const now = new Date().toISOString();
-  const existing = state.entries[id] || {
-    id,
-    phone: sessionPhone,
-    date: selectedDate,
-    ratings: {},
-    createdAt: now,
-  };
+  const entryId = buildEntryId(state.currentUser.uid, state.selectedDate);
+  const existing = state.entries[entryId];
+  const profile = getCurrentProfile();
 
-  state.entries[id] = {
-    ...existing,
-    selfScore,
-    bullets,
-    updatedAt: now,
-  };
-
-  saveState();
+  state.dashboardNotice = { tone: "info", text: "Saving your daily recap..." };
   render();
+
+  try {
+    await setDoc(doc(db, "entries", entryId), {
+      ownerUid: state.currentUser.uid,
+      ownerPhoneNumber: state.currentUser.phoneNumber || state.pendingPhoneNumber || "",
+      date: state.selectedDate,
+      selfScore,
+      bullets,
+      createdAt: existing?.createdAt || serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ownerColor: profile.color,
+    });
+    state.entryFormDirty = false;
+    state.dashboardNotice = { tone: "success", text: "Daily recap saved." };
+    render();
+  } catch (error) {
+    state.dashboardNotice = {
+      tone: "error",
+      text: friendlyErrorMessage(error),
+    };
+    render();
+  }
 }
 
-function handleRateEntry(event) {
+async function handleRateEntry(event) {
   const button = event.target.closest("[data-entry-id][data-rate]");
 
-  if (!button || !sessionPhone) {
+  if (!button || !db || !state.currentUser) {
     return;
   }
 
   const entryId = button.dataset.entryId;
-  const rating = Number(button.dataset.rate);
+  const score = Number(button.dataset.rate);
   const entry = state.entries[entryId];
 
-  if (!entry || entry.phone === sessionPhone || rating < 1 || rating > 5) {
+  if (!entry || entry.ownerUid === state.currentUser.uid || score < 1 || score > 5) {
     return;
   }
 
-  entry.ratings = entry.ratings || {};
-  entry.ratings[sessionPhone] = rating;
-  entry.updatedAt = new Date().toISOString();
+  const ratingId = buildRatingId(entryId, state.currentUser.uid);
+  const existing = state.ratings[ratingId];
 
-  saveState();
-  render();
+  try {
+    await setDoc(doc(db, "ratings", ratingId), {
+      entryId,
+      date: entry.date,
+      raterUid: state.currentUser.uid,
+      targetUid: entry.ownerUid,
+      score,
+      createdAt: existing?.createdAt || serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    state.dashboardNotice = {
+      tone: "error",
+      text: friendlyErrorMessage(error),
+    };
+    render();
+  }
 }
 
-function handleStorageChange(event) {
-  if (event.key !== STORAGE_KEY && event.key !== SESSION_KEY) {
+async function ensureRecaptcha() {
+  if (state.recaptchaVerifier) {
+    return state.recaptchaVerifier;
+  }
+
+  state.recaptchaVerifier = new RecaptchaVerifier(auth, "send-code-button", {
+    size: "invisible",
+    callback: () => {},
+    "expired-callback": () => {
+      state.authNotice = {
+        tone: "info",
+        text: "The verification challenge expired. Send a fresh code.",
+      };
+      render();
+    },
+  });
+
+  state.recaptchaWidgetId = await state.recaptchaVerifier.render();
+  return state.recaptchaVerifier;
+}
+
+async function resetRecaptcha() {
+  if (typeof state.recaptchaWidgetId === "number" && window.grecaptcha) {
+    window.grecaptcha.reset(state.recaptchaWidgetId);
     return;
   }
 
-  state = loadState();
-  sessionPhone = window.localStorage.getItem(SESSION_KEY) || "";
-  render();
+  if (state.recaptchaVerifier) {
+    state.recaptchaWidgetId = await state.recaptchaVerifier.render();
+  }
+}
+
+async function ensureUserProfile(user, nicknameOverride = "") {
+  if (!db || !user) {
+    return null;
+  }
+
+  const userRef = doc(db, "users", user.uid);
+  const snapshot = await getDoc(userRef);
+  const existing = snapshot.exists() ? snapshot.data() : null;
+  const nickname = nicknameOverride.trim() || existing?.nickname || "";
+  const phoneNumber = user.phoneNumber || existing?.phoneNumber || state.pendingPhoneNumber || "";
+  const color = existing?.color || buildColorFromKey(user.uid);
+
+  if (!existing) {
+    await setDoc(userRef, {
+      uid: user.uid,
+      phoneNumber,
+      nickname,
+      color,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return;
+  }
+
+  if (
+    existing.nickname !== nickname ||
+    existing.phoneNumber !== phoneNumber ||
+    existing.color !== color
+  ) {
+    await updateDoc(userRef, {
+      nickname,
+      phoneNumber,
+      color,
+      updatedAt: serverTimestamp(),
+    });
+  }
+}
+
+function subscribeToUsers() {
+  if (!db) {
+    return;
+  }
+
+  if (state.listeners.users) {
+    state.listeners.users();
+  }
+
+  state.listeners.users = onSnapshot(
+    collection(db, "users"),
+    (snapshot) => {
+      state.users = Object.fromEntries(
+        snapshot.docs.map((document) => [document.id, { id: document.id, ...document.data() }]),
+      );
+      state.currentProfile = state.currentUser ? state.users[state.currentUser.uid] || null : null;
+      render();
+    },
+    (error) => {
+      state.dashboardNotice = {
+        tone: "error",
+        text: friendlyErrorMessage(error),
+      };
+      render();
+    },
+  );
+}
+
+function subscribeToSelectedDate() {
+  if (!db || !state.currentUser) {
+    return;
+  }
+
+  if (state.listeners.entries) {
+    state.listeners.entries();
+  }
+
+  if (state.listeners.ratings) {
+    state.listeners.ratings();
+  }
+
+  state.entries = {};
+  state.ratings = {};
+
+  const entriesQuery = query(collection(db, "entries"), where("date", "==", state.selectedDate));
+  const ratingsQuery = query(collection(db, "ratings"), where("date", "==", state.selectedDate));
+
+  state.listeners.entries = onSnapshot(
+    entriesQuery,
+    (snapshot) => {
+      state.entries = Object.fromEntries(
+        snapshot.docs.map((document) => [document.id, { id: document.id, ...document.data() }]),
+      );
+      render();
+    },
+    (error) => {
+      state.dashboardNotice = {
+        tone: "error",
+        text: friendlyErrorMessage(error),
+      };
+      render();
+    },
+  );
+
+  state.listeners.ratings = onSnapshot(
+    ratingsQuery,
+    (snapshot) => {
+      state.ratings = Object.fromEntries(
+        snapshot.docs.map((document) => [document.id, { id: document.id, ...document.data() }]),
+      );
+      render();
+    },
+    (error) => {
+      state.dashboardNotice = {
+        tone: "error",
+        text: friendlyErrorMessage(error),
+      };
+      render();
+    },
+  );
+}
+
+function clearRealtimeSubscriptions() {
+  for (const key of Object.keys(state.listeners)) {
+    if (state.listeners[key]) {
+      state.listeners[key]();
+      state.listeners[key] = null;
+    }
+  }
+
+  state.entries = {};
+  state.ratings = {};
 }
 
 function render() {
-  const loggedIn = Boolean(sessionPhone);
+  dom.selectedDate.value = state.selectedDate;
+
+  const configured = !state.setupError;
+  const loggedIn = Boolean(state.currentUser);
 
   dom.loginPanel.hidden = loggedIn;
   dom.dashboard.hidden = !loggedIn;
-  dom.selectedDate.value = selectedDate;
+  dom.verificationStep.hidden = !state.confirmationResult;
+  dom.sendCodeButton.textContent = state.confirmationResult
+    ? "Send a new code"
+    : "Send verification code";
+
+  setNotice(dom.authMessage, state.authNotice);
+  setNotice(dom.dashboardMessage, state.dashboardNotice);
+  setNotice(
+    dom.setupNotice,
+    configured
+      ? null
+      : {
+          tone: "error",
+          text: state.setupError,
+        },
+  );
+
+  setElementsDisabled(
+    [dom.phoneInput, dom.nicknameInput, dom.sendCodeButton],
+    !configured || !state.authReady,
+  );
+
+  setElementsDisabled(
+    [dom.verificationCodeInput, ...dom.verifyForm.querySelectorAll("button")],
+    !configured || !state.confirmationResult,
+  );
 
   if (!loggedIn) {
     return;
   }
 
-  const currentUser = state.users[sessionPhone] || ensureUser(sessionPhone);
+  const profile = getCurrentProfile();
 
-  renderSessionBadge(currentUser);
+  if (document.activeElement !== dom.profileNicknameInput) {
+    dom.profileNicknameInput.value = profile.nickname || "";
+  }
+
+  renderSessionBadge(profile);
   renderEntryForm();
   renderDaySummary();
   renderChart();
   renderEntries();
 }
 
-function renderSessionBadge(user) {
+function renderSessionBadge(profile) {
   dom.sessionBadge.innerHTML = `
     <div class="profile-chip">
-      <span class="profile-swatch" style="background:${user.color};"></span>
+      <span class="profile-swatch" style="background:${profile.color};"></span>
       <span class="profile-label">
-        <span class="profile-name">${escapeHtml(displayName(user))}</span>
-        <span class="profile-phone">${escapeHtml(formatPhone(user.phone))}</span>
+        <span class="profile-name">${escapeHtml(displayName(profile))}</span>
+        <span class="profile-phone">${escapeHtml(formatPhone(profile.phoneNumber))}</span>
       </span>
     </div>
   `;
 }
 
 function renderEntryForm() {
-  const entry = getEntry(sessionPhone, selectedDate);
+  if (!state.currentUser) {
+    return;
+  }
 
+  const entryKey = buildEntryId(state.currentUser.uid, state.selectedDate);
+  if (state.lastEntryFormKey !== entryKey) {
+    state.lastEntryFormKey = entryKey;
+    state.entryFormDirty = false;
+  }
+
+  if (state.entryFormDirty) {
+    return;
+  }
+
+  const entry = state.entries[entryKey] || null;
   const scoreInputs = dom.entryForm.querySelectorAll('input[name="selfScore"]');
+
   scoreInputs.forEach((input) => {
-    input.checked = entry ? Number(input.value) === entry.selfScore : false;
+    input.checked = entry ? Number(input.value) === Number(entry.selfScore) : false;
   });
 
   for (let index = 1; index <= 5; index += 1) {
@@ -221,11 +677,11 @@ function renderEntryForm() {
 }
 
 function renderDaySummary() {
-  const entries = getEntriesForDate(selectedDate);
+  const entries = getEntriesForSelectedDate();
   const averages = entries.map(getAverageScore);
   const peopleCount = entries.length;
   const ratingsCount = entries.reduce(
-    (total, entry) => total + Object.keys(entry.ratings || {}).length,
+    (total, entry) => total + getRatingsForEntry(entry.id).length,
     0,
   );
   const dayAverage = averages.length
@@ -249,28 +705,21 @@ function renderDaySummary() {
 }
 
 function renderChart() {
-  const entries = getEntriesForDate(selectedDate).sort((left, right) => {
-    const averageDifference = getAverageScore(right) - getAverageScore(left);
-    if (averageDifference !== 0) {
-      return averageDifference;
-    }
-
-    return displayName(getUser(left.phone)).localeCompare(displayName(getUser(right.phone)));
-  });
+  const entries = sortEntries(getEntriesForSelectedDate());
 
   const markers = entries
     .map((entry, index) => {
-      const user = getUser(entry.phone);
+      const profile = getUserProfile(entry.ownerUid, entry.ownerPhoneNumber, entry.ownerColor);
       const average = getAverageScore(entry);
       const placement = levelForScore(average);
       const left = entries.length === 1 ? 50 : 10 + (index * 80) / (entries.length - 1);
       const bottom = 6 + ((average - 1) / 4) * 88;
 
       return `
-        <div class="chart-marker" style="left:${left}%; bottom:${bottom}%; --marker:${user.color};">
+        <div class="chart-marker" style="left:${left}%; bottom:${bottom}%; --marker:${profile.color};">
           <span class="marker-dot"></span>
           <div class="marker-card">
-            <span class="marker-name">${escapeHtml(displayName(user))}</span>
+            <span class="marker-name">${escapeHtml(displayName(profile))}</span>
             <span class="marker-score">${average.toFixed(2)} · ${escapeHtml(placement.name)}</span>
           </div>
         </div>
@@ -294,27 +743,18 @@ function renderChart() {
           </div>
         `,
       ).join("")}
-      <div class="chart-markers">
-        ${markers}
-      </div>
+      <div class="chart-markers">${markers}</div>
     </div>
   `;
 }
 
 function renderEntries() {
-  const entries = getEntriesForDate(selectedDate).sort((left, right) => {
-    const averageDifference = getAverageScore(right) - getAverageScore(left);
-    if (averageDifference !== 0) {
-      return averageDifference;
-    }
-
-    return displayName(getUser(left.phone)).localeCompare(displayName(getUser(right.phone)));
-  });
+  const entries = sortEntries(getEntriesForSelectedDate());
 
   if (!entries.length) {
     dom.entriesList.innerHTML = `
       <div class="empty-state centered">
-        Nobody has posted for ${escapeHtml(formatDateLabel(selectedDate))} yet.
+        Nobody has posted for ${escapeHtml(formatDateLabel(state.selectedDate))} yet.
         Save the first five-bullet recap to start the board.
       </div>
     `;
@@ -323,21 +763,21 @@ function renderEntries() {
 
   dom.entriesList.innerHTML = entries
     .map((entry) => {
-      const user = getUser(entry.phone);
+      const profile = getUserProfile(entry.ownerUid, entry.ownerPhoneNumber, entry.ownerColor);
       const average = getAverageScore(entry);
       const placement = levelForScore(average);
-      const peerRatings = Object.keys(entry.ratings || {}).length;
-      const myRating = entry.ratings?.[sessionPhone];
-      const isOwnEntry = entry.phone === sessionPhone;
+      const peerRatings = getRatingsForEntry(entry.id);
+      const myRating = peerRatings.find((rating) => rating.raterUid === state.currentUser?.uid);
+      const isOwnEntry = entry.ownerUid === state.currentUser?.uid;
 
       return `
         <article class="entry-card">
           <div class="entry-header">
             <div class="entry-user">
-              <span class="profile-swatch" style="background:${user.color};"></span>
+              <span class="profile-swatch" style="background:${profile.color};"></span>
               <div>
-                <h3>${escapeHtml(displayName(user))}</h3>
-                <div class="entry-phone">${escapeHtml(formatPhone(user.phone))}</div>
+                <h3>${escapeHtml(displayName(profile))}</h3>
+                <div class="entry-phone">${escapeHtml(formatPhone(profile.phoneNumber))}</div>
               </div>
             </div>
 
@@ -349,7 +789,7 @@ function renderEntries() {
 
           <div class="entry-meta">
             <span class="pill">Self score: ${entry.selfScore}</span>
-            <span class="pill">Peer ratings: ${peerRatings}</span>
+            <span class="pill">Peer ratings: ${peerRatings.length}</span>
             <span class="pill">Viewed day: ${escapeHtml(formatDateLabel(entry.date))}</span>
           </div>
 
@@ -359,7 +799,7 @@ function renderEntries() {
 
           ${
             isOwnEntry
-              ? `<p class="owner-note">This is your entry. Other people rate it from their own login.</p>`
+              ? `<p class="owner-note">This is your entry. Other people rate it from their own verified login.</p>`
               : `
                 <div class="rating-panel">
                   <strong>Rate this day</strong>
@@ -367,7 +807,7 @@ function renderEntries() {
                     ${LEVELS.map(
                       (level) => `
                         <button
-                          class="rate-button ${Number(myRating) === level.score ? "is-active" : ""}"
+                          class="rate-button ${Number(myRating?.score) === level.score ? "is-active" : ""}"
                           type="button"
                           data-entry-id="${entry.id}"
                           data-rate="${level.score}"
@@ -386,50 +826,64 @@ function renderEntries() {
     .join("");
 }
 
-function getEntriesForDate(date) {
-  return Object.values(state.entries).filter((entry) => entry.date === date);
+function getEntriesForSelectedDate() {
+  return Object.values(state.entries);
 }
 
-function getEntry(phone, date) {
-  return state.entries[buildEntryId(phone, date)] || null;
+function getRatingsForEntry(entryId) {
+  return Object.values(state.ratings).filter((rating) => rating.entryId === entryId);
 }
 
-function getUser(phone) {
-  return (
-    state.users[phone] || {
-      phone,
+function getAverageScore(entry) {
+  const peerScores = getRatingsForEntry(entry.id).map((rating) => Number(rating.score));
+  const scores = [Number(entry.selfScore), ...peerScores].filter(Boolean);
+  return scores.reduce((sum, value) => sum + value, 0) / scores.length;
+}
+
+function getCurrentProfile() {
+  if (!state.currentUser) {
+    return {
+      uid: "",
       nickname: "",
-      color: buildColorFromPhone(phone),
+      phoneNumber: "",
+      color: buildColorFromKey("fallback"),
+    };
+  }
+
+  return getUserProfile(
+    state.currentUser.uid,
+    state.currentUser.phoneNumber || state.pendingPhoneNumber,
+    buildColorFromKey(state.currentUser.uid),
+  );
+}
+
+function getUserProfile(uid, phoneNumber = "", fallbackColor = "") {
+  return (
+    state.users[uid] || {
+      uid,
+      nickname: "",
+      phoneNumber,
+      color: fallbackColor || buildColorFromKey(uid),
     }
   );
 }
 
-function ensureUser(phone, nickname = "") {
-  const current = getUser(phone);
-  const nextUser = {
-    ...current,
-    phone,
-    nickname: nickname || current.nickname || "",
-    color: current.color || buildColorFromPhone(phone),
-    createdAt: current.createdAt || new Date().toISOString(),
-  };
+function sortEntries(entries) {
+  return [...entries].sort((left, right) => {
+    const scoreDifference = getAverageScore(right) - getAverageScore(left);
+    if (scoreDifference !== 0) {
+      return scoreDifference;
+    }
 
-  const previousUser = state.users[phone];
-  const changed = JSON.stringify(previousUser) !== JSON.stringify(nextUser);
+    const leftName = displayName(
+      getUserProfile(left.ownerUid, left.ownerPhoneNumber, left.ownerColor),
+    );
+    const rightName = displayName(
+      getUserProfile(right.ownerUid, right.ownerPhoneNumber, right.ownerColor),
+    );
 
-  state.users[phone] = nextUser;
-
-  if (changed) {
-    saveState();
-  }
-
-  return nextUser;
-}
-
-function getAverageScore(entry) {
-  const peerRatings = Object.values(entry.ratings || {}).map(Number);
-  const scores = [Number(entry.selfScore), ...peerRatings].filter(Boolean);
-  return scores.reduce((sum, value) => sum + value, 0) / scores.length;
+    return leftName.localeCompare(rightName);
+  });
 }
 
 function levelForScore(score) {
@@ -452,56 +906,106 @@ function levelForScore(score) {
   return LEVELS[4];
 }
 
-function buildEntryId(phone, date) {
-  return `${phone}:${date}`;
-}
-
-function loadState() {
-  try {
-    const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}");
-    return {
-      users: saved.users && typeof saved.users === "object" ? saved.users : {},
-      entries: saved.entries && typeof saved.entries === "object" ? saved.entries : {},
-    };
-  } catch (error) {
-    return { users: {}, entries: {} };
+function setNotice(element, notice) {
+  if (!element) {
+    return;
   }
+
+  if (!notice?.text) {
+    element.hidden = true;
+    element.textContent = "";
+    element.removeAttribute("data-tone");
+    return;
+  }
+
+  element.hidden = false;
+  element.dataset.tone = notice.tone || "info";
+  element.textContent = notice.text;
 }
 
-function saveState() {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+function setElementsDisabled(elements, disabled) {
+  elements.forEach((element) => {
+    if (element) {
+      element.disabled = disabled;
+    }
+  });
 }
 
-function sanitizePhone(value) {
-  return String(value || "").replace(/\D/g, "");
+function resetEntryDraft() {
+  state.entryFormDirty = false;
+  state.lastEntryFormKey = "";
 }
 
-function isValidPhone(phone) {
-  return phone.length >= 10 && phone.length <= 15;
+function buildEntryId(uid, date) {
+  return `${uid}_${date}`;
 }
 
-function formatPhone(phone) {
-  if (!phone) {
+function buildRatingId(entryId, uid) {
+  return `${entryId}__${uid}`;
+}
+
+function getFirebaseConfig() {
+  const config = window.BEHAVIOR_CHART_CONFIG;
+  if (!config || typeof config !== "object") {
+    return null;
+  }
+
+  const requiredFields = ["apiKey", "authDomain", "projectId", "appId", "messagingSenderId"];
+  const missingField = requiredFields.find((field) => {
+    const value = String(config[field] || "").trim();
+    return !value || value.includes("REPLACE_ME");
+  });
+
+  return missingField ? null : config;
+}
+
+function normalizePhoneForSms(value) {
+  const raw = String(value || "").trim();
+  const digits = raw.replace(/\D/g, "");
+
+  if (raw.startsWith("+")) {
+    return digits.length >= 10 && digits.length <= 15 ? `+${digits}` : "";
+  }
+
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+
+  if (digits.length >= 10 && digits.length <= 15) {
+    return `+${digits}`;
+  }
+
+  return "";
+}
+
+function formatPhone(phoneNumber) {
+  const digits = String(phoneNumber || "").replace(/\D/g, "");
+
+  if (!digits) {
     return "";
   }
 
-  if (phone.length === 10) {
-    return `(${phone.slice(0, 3)}) ${phone.slice(3, 6)}-${phone.slice(6)}`;
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
   }
 
-  if (phone.length === 11 && phone.startsWith("1")) {
-    return `+1 (${phone.slice(1, 4)}) ${phone.slice(4, 7)}-${phone.slice(7)}`;
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
   }
 
-  return `+${phone}`;
+  return phoneNumber.startsWith("+") ? phoneNumber : `+${digits}`;
 }
 
-function displayName(user) {
-  return user.nickname || formatPhone(user.phone);
+function displayName(profile) {
+  return profile.nickname || formatPhone(profile.phoneNumber);
 }
 
-function buildColorFromPhone(phone) {
-  const hash = [...phone].reduce((total, character) => {
+function buildColorFromKey(key) {
+  const hash = [...String(key || "fallback")].reduce((total, character) => {
     return (total * 31 + character.charCodeAt(0)) % 360;
   }, 19);
 
@@ -525,6 +1029,31 @@ function formatDateLabel(date) {
     day: "numeric",
     year: "numeric",
   }).format(new Date(`${date}T12:00:00`));
+}
+
+function friendlyErrorMessage(error) {
+  const code = error?.code || "";
+
+  switch (code) {
+    case "auth/invalid-phone-number":
+      return "That phone number format did not work. Use a real number like (555) 123-4567.";
+    case "auth/invalid-verification-code":
+      return "That verification code does not match. Check the SMS and try again.";
+    case "auth/missing-verification-code":
+      return "Enter the six-digit verification code from the text message.";
+    case "auth/code-expired":
+      return "That code expired. Send a fresh code and try again.";
+    case "auth/unauthorized-domain":
+      return "This site domain is not authorized in Firebase Auth yet. Add it in Authentication settings.";
+    case "auth/quota-exceeded":
+      return "Firebase blocked more verification texts for now. Phone auth SMS requires the Blaze plan and has quotas.";
+    case "auth/too-many-requests":
+      return "Too many attempts right now. Wait a bit and try again.";
+    case "permission-denied":
+      return "Firestore rejected that request. Deploy the included firestore.rules file before testing shared data.";
+    default:
+      return error?.message || "Something went wrong. Try again.";
+  }
 }
 
 function escapeHtml(value) {

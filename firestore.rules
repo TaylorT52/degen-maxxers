@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function validScore(score) {
+      return score is int && score >= 1 && score <= 5;
+    }
+
+    function validBullets(bullets) {
+      return bullets is list
+        && bullets.size() == 5
+        && bullets[0] is string && bullets[0].size() > 0 && bullets[0].size() <= 180
+        && bullets[1] is string && bullets[1].size() > 0 && bullets[1].size() <= 180
+        && bullets[2] is string && bullets[2].size() > 0 && bullets[2].size() <= 180
+        && bullets[3] is string && bullets[3].size() > 0 && bullets[3].size() <= 180
+        && bullets[4] is string && bullets[4].size() > 0 && bullets[4].size() <= 180;
+    }
+
+    function entryDoc(entryId) {
+      return get(/databases/$(database)/documents/entries/$(entryId));
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && userId == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.phoneNumber == request.auth.token.phone_number
+        && request.resource.data.nickname is string
+        && request.resource.data.color is string;
+
+      allow update: if signedIn()
+        && userId == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.phoneNumber == resource.data.phoneNumber
+        && request.resource.data.color == resource.data.color
+        && request.resource.data.nickname is string;
+
+      allow delete: if false;
+    }
+
+    match /entries/{entryId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerPhoneNumber == request.auth.token.phone_number
+        && request.resource.data.date is string
+        && request.resource.data.ownerColor is string
+        && validScore(request.resource.data.selfScore)
+        && validBullets(request.resource.data.bullets);
+
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.ownerPhoneNumber == resource.data.ownerPhoneNumber
+        && request.resource.data.date == resource.data.date
+        && request.resource.data.ownerColor == resource.data.ownerColor
+        && validScore(request.resource.data.selfScore)
+        && validBullets(request.resource.data.bullets);
+
+      allow delete: if false;
+    }
+
+    match /ratings/{ratingId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.raterUid == request.auth.uid
+        && request.resource.data.targetUid is string
+        && request.resource.data.entryId is string
+        && request.resource.data.date is string
+        && request.resource.data.raterUid != request.resource.data.targetUid
+        && validScore(request.resource.data.score)
+        && entryDoc(request.resource.data.entryId).data.ownerUid == request.resource.data.targetUid
+        && entryDoc(request.resource.data.entryId).data.date == request.resource.data.date;
+
+      allow update: if signedIn()
+        && resource.data.raterUid == request.auth.uid
+        && request.resource.data.raterUid == resource.data.raterUid
+        && request.resource.data.targetUid == resource.data.targetUid
+        && request.resource.data.entryId == resource.data.entryId
+        && request.resource.data.date == resource.data.date
+        && request.resource.data.raterUid != request.resource.data.targetUid
+        && validScore(request.resource.data.score)
+        && entryDoc(request.resource.data.entryId).data.ownerUid == request.resource.data.targetUid;
+
+      allow delete: if false;
+    }
+  }
+}

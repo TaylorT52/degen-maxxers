@@ -1,41 +1,35 @@
-# Behavior Chart Prototype
-
-This is a static vanilla HTML/CSS/JS prototype for the behavior chart site.
+# Behavior Chart
 
 ## What it does
 
-- Sign in with a phone number
-- Optionally add a nickname
+- Sign in with a real phone number using Firebase Authentication
+- Persist login sessions in the browser
+- Persist nicknames in Firestore
 - Pick a specific day
 - Rank yourself from `1` to `5`
 - Write exactly five bullet points about that day
 - Read everyone else's bullet points for the same day
 - Rate their day from `1` to `5`
 - See each person's average score and chart placement
-- Keep a persistent personal color for each phone number
+- Keep a persistent personal color for each person
+- Share the same entries and ratings across multiple browsers and devices
 
-## How it stores data
+## Backend
 
-Right now, everything is stored in `localStorage` so the site works as a fully static prototype.
+This app now uses:
 
-That means:
+- Firebase Authentication for phone sign-in
+- Cloud Firestore for shared persistence
+- Browser-local auth persistence for staying signed in
 
-- It works immediately when you open `index.html`
-- You can test different users by switching phone numbers
-- Data is saved in the current browser
-- It is not yet a real shared multi-user backend
+## Setup
 
-## Files
+Setup steps are in [FIREBASE_SETUP.md](/Users/taylortam/Downloads/code/degen-maxxers/FIREBASE_SETUP.md:1).
 
-- `index.html`
-- `styles.css`
-- `app.js`
+The main project files are:
 
-## Next step for a real shared version
-
-To make this work across multiple phones and browsers, the next step would be to connect this UI to:
-
-- Firebase Auth + Firestore
-- or Supabase Auth + Database
-
-That would give you real phone verification, shared entries, and shared ratings while still letting you host the frontend on GitHub Pages.
+- [index.html](/Users/taylortam/Downloads/code/degen-maxxers/index.html:1)
+- [styles.css](/Users/taylortam/Downloads/code/degen-maxxers/styles.css:1)
+- [app.js](/Users/taylortam/Downloads/code/degen-maxxers/app.js:1)
+- [config.js](/Users/taylortam/Downloads/code/degen-maxxers/config.js:1)
+- [firestore.rules](/Users/taylortam/Downloads/code/degen-maxxers/firestore.rules:1)
