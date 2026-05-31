@@ -13,6 +13,10 @@ service cloud.firestore {
       return date is string && date.matches('^\\d{4}-\\d{2}-\\d{2}$');
     }
 
+    function validTagKey(tagKey) {
+      return tagKey is string && tagKey == 'brooks_modesitt_mention';
+    }
+
     function validBullets(bullets) {
       return bullets is list
         && bullets.size() == 5
@@ -109,6 +113,35 @@ service cloud.firestore {
         && entryDoc(request.resource.data.entryId).data.ownerUid == request.resource.data.targetUid;
 
       allow delete: if false;
+    }
+
+    match /tags/{tagId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.assigneeUid == request.auth.uid
+        && request.resource.data.entryId is string
+        && validDate(request.resource.data.date)
+        && validTagKey(request.resource.data.tagKey)
+        && tagId == request.resource.data.entryId + "__" + request.resource.data.tagKey + "__" + request.auth.uid
+        && entryExists(request.resource.data.entryId)
+        && entryDoc(request.resource.data.entryId).data.date == request.resource.data.date;
+
+      allow update: if signedIn()
+        && resource.data.assigneeUid == request.auth.uid
+        && request.resource.data.assigneeUid == resource.data.assigneeUid
+        && request.resource.data.entryId == resource.data.entryId
+        && request.resource.data.date == resource.data.date
+        && request.resource.data.tagKey == resource.data.tagKey
+        && validTagKey(request.resource.data.tagKey)
+        && tagId == resource.data.entryId + "__" + resource.data.tagKey + "__" + request.auth.uid
+        && entryExists(request.resource.data.entryId)
+        && entryDoc(request.resource.data.entryId).data.date == request.resource.data.date;
+
+      allow delete: if signedIn()
+        && resource.data.assigneeUid == request.auth.uid
+        && validTagKey(resource.data.tagKey)
+        && tagId == resource.data.entryId + "__" + resource.data.tagKey + "__" + request.auth.uid;
     }
   }
 }

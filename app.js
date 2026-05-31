@@ -12,6 +12,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getFirestore,
@@ -56,6 +57,19 @@ const LEVELS = [
   },
 ];
 
+const ENTRY_TAGS = [
+  {
+    key: "brooks_modesitt_mention",
+    label: "Mentioned Brooks Modesitt",
+    caption: "Anyone can assign this tag for a -0.50 penalty.",
+    scoreDelta: -0.5,
+  },
+];
+
+const ENTRY_TAGS_BY_KEY = Object.fromEntries(
+  ENTRY_TAGS.map((tag) => [tag.key, tag]),
+);
+
 const dom = {
   loginPanel: document.querySelector("#login-panel"),
   dashboard: document.querySelector("#dashboard"),
@@ -83,6 +97,7 @@ const state = {
   users: {},
   entries: {},
   ratings: {},
+  tags: {},
   authNotice: null,
   dashboardNotice: null,
   entryFormDirty: false,
@@ -91,6 +106,7 @@ const state = {
     users: null,
     entries: null,
     ratings: null,
+    tags: null,
   },
 };
 
@@ -106,7 +122,7 @@ async function bootstrap() {
   const firebaseConfig = getFirebaseConfig();
   if (!firebaseConfig) {
     state.setupError =
-      "Firebase is not configured yet. Add your real project values in config.js to enable Google sign-in and shared ratings.";
+      "Firebase is not configured yet. Copy config.example.js to config.js and add your real project values to enable Google sign-in and shared ratings.";
     render();
     return;
   }
@@ -172,7 +188,7 @@ function bindEvents() {
   dom.saveProfileButton.addEventListener("click", handleSaveProfile);
   dom.entryForm.addEventListener("submit", handleSaveEntry);
   dom.entryForm.addEventListener("input", handleEntryFormInput);
-  dom.entriesList.addEventListener("click", handleRateEntry);
+  dom.entriesList.addEventListener("click", handleEntryAction);
 }
 
 async function handleGoogleSignIn() {
@@ -328,8 +344,25 @@ async function handleSaveEntry(event) {
   }
 }
 
-async function handleRateEntry(event) {
-  const button = event.target.closest("[data-entry-id][data-rate]");
+async function handleEntryAction(event) {
+  const tagButton = event.target.closest("[data-entry-id][data-tag-key]");
+
+  if (tagButton) {
+    await handleToggleTag(tagButton);
+    return;
+  }
+
+  const rateButton = event.target.closest("[data-entry-id][data-rate]");
+
+  if (rateButton) {
+    await handleRateEntry(rateButton);
+  }
+}
+
+async function handleRateEntry(button) {
+  if (!button) {
+    return;
+  }
 
   if (!button || !db || !state.currentUser) {
     return;
@@ -353,6 +386,46 @@ async function handleRateEntry(event) {
       raterUid: state.currentUser.uid,
       targetUid: entry.ownerUid,
       score,
+      createdAt: existing?.createdAt || serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    state.dashboardNotice = {
+      tone: "error",
+      text: friendlyErrorMessage(error),
+    };
+    render();
+  }
+}
+
+async function handleToggleTag(button) {
+  if (!button || !db || !state.currentUser) {
+    return;
+  }
+
+  const entryId = button.dataset.entryId;
+  const tagKey = button.dataset.tagKey;
+  const entry = state.entries[entryId];
+  const tag = getEntryTag(tagKey);
+
+  if (!entry || !tag) {
+    return;
+  }
+
+  const tagId = buildTagAssignmentId(entryId, tagKey, state.currentUser.uid);
+  const existing = state.tags[tagId];
+
+  try {
+    if (existing) {
+      await deleteDoc(doc(db, "tags", tagId));
+      return;
+    }
+
+    await setDoc(doc(db, "tags", tagId), {
+      entryId,
+      date: entry.date,
+      assigneeUid: state.currentUser.uid,
+      tagKey,
       createdAt: existing?.createdAt || serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -442,11 +515,17 @@ function subscribeToSelectedDate() {
     state.listeners.ratings();
   }
 
+  if (state.listeners.tags) {
+    state.listeners.tags();
+  }
+
   state.entries = {};
   state.ratings = {};
+  state.tags = {};
 
   const entriesQuery = query(collection(db, "entries"), where("date", "==", state.selectedDate));
   const ratingsQuery = query(collection(db, "ratings"), where("date", "==", state.selectedDate));
+  const tagsQuery = query(collection(db, "tags"), where("date", "==", state.selectedDate));
 
   state.listeners.entries = onSnapshot(
     entriesQuery,
@@ -481,6 +560,23 @@ function subscribeToSelectedDate() {
       render();
     },
   );
+
+  state.listeners.tags = onSnapshot(
+    tagsQuery,
+    (snapshot) => {
+      state.tags = Object.fromEntries(
+        snapshot.docs.map((document) => [document.id, { id: document.id, ...document.data() }]),
+      );
+      render();
+    },
+    (error) => {
+      state.dashboardNotice = {
+        tone: "error",
+        text: friendlyErrorMessage(error),
+      };
+      render();
+    },
+  );
 }
 
 function clearRealtimeSubscriptions() {
@@ -493,6 +589,7 @@ function clearRealtimeSubscriptions() {
 
   state.entries = {};
   state.ratings = {};
+  state.tags = {};
 }
 
 function render() {
@@ -614,7 +711,7 @@ function renderChart() {
       const average = getAverageScore(entry);
       const placement = levelForScore(average);
       const left = entries.length === 1 ? 50 : 10 + (index * 80) / (entries.length - 1);
-      const bottom = 6 + ((average - 1) / 4) * 88;
+      const bottom = 6 + ((clampNumber(average, 1, 5) - 1) / 4) * 88;
 
       return `
         <div class="chart-marker" style="left:${left}%; bottom:${bottom}%; --marker:${profile.color};">
@@ -669,6 +766,7 @@ function renderEntries() {
       const placement = levelForScore(average);
       const peerRatings = getRatingsForEntry(entry.id);
       const myRating = peerRatings.find((rating) => rating.raterUid === state.currentUser?.uid);
+      const activeTags = getActiveTagsForEntry(entry);
       const isOwnEntry = entry.ownerUid === state.currentUser?.uid;
 
       return `
@@ -692,6 +790,15 @@ function renderEntries() {
             <span class="pill">Self score: ${entry.selfScore}</span>
             <span class="pill">Peer ratings: ${peerRatings.length}</span>
             <span class="pill">Viewed day: ${escapeHtml(formatDateLabel(entry.date))}</span>
+            ${activeTags
+              .map(
+                ({ tag, assignments }) => `
+                  <span class="pill pill-tag">
+                    ${escapeHtml(tag.label)} · ${assignments.length} ${assignments.length === 1 ? "assignment" : "assignments"} · ${formatSignedScore(tag.scoreDelta)}
+                  </span>
+                `,
+              )
+              .join("")}
           </div>
 
           <ul class="bullet-list">
@@ -700,7 +807,7 @@ function renderEntries() {
 
           ${
             isOwnEntry
-              ? `<p class="owner-note">This is your entry. Other people rate it from their own Google login.</p>`
+              ? `<p class="owner-note">This is your entry. Other people rate it from their own Google login, but anyone can still assign tags.</p>`
               : `
                 <div class="rating-panel">
                   <strong>Rate this day</strong>
@@ -721,6 +828,34 @@ function renderEntries() {
                 </div>
               `
           }
+
+          <div class="tag-panel">
+            <strong>Assign tags</strong>
+            <div class="tag-grid">
+              ${ENTRY_TAGS.map((tag) => {
+                const assignments = getTagAssignmentsForEntry(entry.id, tag.key);
+                const assignedByMe = assignments.some(
+                  (assignment) => assignment.assigneeUid === state.currentUser?.uid,
+                );
+                const metaText = assignments.length
+                  ? `${assignments.length} ${assignments.length === 1 ? "person" : "people"} assigned · ${formatSignedScore(tag.scoreDelta)}`
+                  : `${escapeHtml(tag.caption)}`;
+
+                return `
+                  <button
+                    class="tag-button ${assignedByMe ? "is-active" : ""}"
+                    type="button"
+                    data-entry-id="${entry.id}"
+                    data-tag-key="${tag.key}"
+                    aria-pressed="${assignedByMe}"
+                  >
+                    <span class="tag-button-title">${escapeHtml(tag.label)}</span>
+                    <span class="tag-button-meta">${metaText}</span>
+                  </button>
+                `;
+              }).join("")}
+            </div>
+          </div>
         </article>
       `;
     })
@@ -735,10 +870,32 @@ function getRatingsForEntry(entryId) {
   return Object.values(state.ratings).filter((rating) => rating.entryId === entryId);
 }
 
+function getEntryTag(tagKey) {
+  return ENTRY_TAGS_BY_KEY[tagKey] || null;
+}
+
+function getTagAssignmentsForEntry(entryId, tagKey) {
+  return Object.values(state.tags).filter((tag) => {
+    return tag.entryId === entryId && tag.tagKey === tagKey;
+  });
+}
+
+function getActiveTagsForEntry(entry) {
+  return ENTRY_TAGS.map((tag) => {
+    const assignments = getTagAssignmentsForEntry(entry.id, tag.key);
+    return assignments.length ? { tag, assignments } : null;
+  }).filter(Boolean);
+}
+
+function getScoreAdjustment(entry) {
+  return getActiveTagsForEntry(entry).reduce((total, { tag }) => total + tag.scoreDelta, 0);
+}
+
 function getAverageScore(entry) {
   const peerScores = getRatingsForEntry(entry.id).map((rating) => Number(rating.score));
   const scores = [Number(entry.selfScore), ...peerScores].filter(Boolean);
-  return scores.reduce((sum, value) => sum + value, 0) / scores.length;
+  const baseAverage = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+  return baseAverage + getScoreAdjustment(entry);
 }
 
 function getCurrentProfile() {
@@ -845,6 +1002,10 @@ function buildRatingId(entryId, uid) {
   return `${entryId}__${uid}`;
 }
 
+function buildTagAssignmentId(entryId, tagKey, uid) {
+  return `${entryId}__${tagKey}__${uid}`;
+}
+
 function getFirebaseConfig() {
   const config = window.BEHAVIOR_CHART_CONFIG;
   if (!config || typeof config !== "object") {
@@ -897,6 +1058,14 @@ function formatDateLabel(date) {
     day: "numeric",
     year: "numeric",
   }).format(new Date(`${date}T12:00:00`));
+}
+
+function formatSignedScore(score) {
+  return `${score > 0 ? "+" : ""}${score.toFixed(2)}`;
+}
+
+function clampNumber(value, minimum, maximum) {
+  return Math.min(Math.max(value, minimum), maximum);
 }
 
 function friendlyErrorMessage(error) {

@@ -234,7 +234,8 @@ textarea {
 
 .primary-button,
 .ghost-button,
-.rate-button {
+.rate-button,
+.tag-button {
   appearance: none;
   border: 0;
   border-radius: 999px;
@@ -244,7 +245,8 @@ textarea {
 
 .primary-button:hover,
 .ghost-button:hover,
-.rate-button:hover {
+.rate-button:hover,
+.tag-button:hover {
   transform: translateY(-1px);
 }
 
@@ -630,12 +632,20 @@ textarea {
   font-weight: 700;
 }
 
-.rating-panel {
+.pill-tag {
+  background: rgba(255, 232, 225, 0.96);
+  border-color: rgba(185, 88, 57, 0.16);
+  color: #7c3f31;
+}
+
+.rating-panel,
+.tag-panel {
   display: grid;
   gap: 10px;
 }
 
-.rating-panel strong {
+.rating-panel strong,
+.tag-panel strong {
   font-size: 0.95rem;
 }
 
@@ -643,6 +653,11 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.tag-grid {
+  display: grid;
+  gap: 10px;
 }
 
 .rate-button {
@@ -658,6 +673,34 @@ textarea {
   color: white;
   background: linear-gradient(135deg, #ef6f94, #d75178);
   box-shadow: 0 10px 18px rgba(215, 81, 120, 0.28);
+}
+
+.tag-button {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 12px 14px;
+  text-align: left;
+  background: rgba(255, 251, 247, 0.96);
+  border: 1px solid rgba(82, 45, 53, 0.1);
+  color: #62464d;
+}
+
+.tag-button.is-active {
+  background: linear-gradient(135deg, #ffb279, #f07952);
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 10px 18px rgba(240, 121, 82, 0.24);
+}
+
+.tag-button-title {
+  font-weight: 800;
+}
+
+.tag-button-meta {
+  font-size: 0.84rem;
+  line-height: 1.4;
+  opacity: 0.8;
 }
 
 .owner-note,
