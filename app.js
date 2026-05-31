@@ -61,7 +61,9 @@ const ENTRY_TAGS = [
   {
     key: "brooks_modesitt_mention",
     label: "Mentioned Brooks Modesitt",
+    shortLabel: "Brooks Mention",
     caption: "Anyone can assign this tag for a -0.50 penalty.",
+    emoji: "📣",
     scoreDelta: -0.5,
   },
 ];
@@ -794,7 +796,11 @@ function renderEntries() {
               .map(
                 ({ tag, assignments }) => `
                   <span class="pill pill-tag">
-                    ${escapeHtml(tag.label)} · ${assignments.length} ${assignments.length === 1 ? "assignment" : "assignments"} · ${formatSignedScore(tag.scoreDelta)}
+                    <span class="pill-tag-icon">${escapeHtml(tag.emoji || "🏷️")}</span>
+                    <span class="pill-tag-copy">
+                      <span class="pill-tag-label">${escapeHtml(tag.shortLabel || tag.label)}</span>
+                      <span class="pill-tag-meta">${formatTagAssignmentCount(assignments.length)} · ${formatSignedScore(tag.scoreDelta)}</span>
+                    </span>
                   </span>
                 `,
               )
@@ -830,16 +836,22 @@ function renderEntries() {
           }
 
           <div class="tag-panel">
-            <strong>Assign tags</strong>
+            <div class="tag-panel-heading">
+              <strong>Assign tags</strong>
+              <span class="tag-panel-copy">Anyone can toggle these on any entry.</span>
+            </div>
             <div class="tag-grid">
               ${ENTRY_TAGS.map((tag) => {
                 const assignments = getTagAssignmentsForEntry(entry.id, tag.key);
                 const assignedByMe = assignments.some(
                   (assignment) => assignment.assigneeUid === state.currentUser?.uid,
                 );
-                const metaText = assignments.length
-                  ? `${assignments.length} ${assignments.length === 1 ? "person" : "people"} assigned · ${formatSignedScore(tag.scoreDelta)}`
+                const metaText = assignedByMe
+                  ? "You assigned this tag."
                   : `${escapeHtml(tag.caption)}`;
+                const assignmentText = assignments.length
+                  ? formatTagAssignmentCount(assignments.length)
+                  : "No one has assigned this yet";
 
                 return `
                   <button
@@ -849,8 +861,13 @@ function renderEntries() {
                     data-tag-key="${tag.key}"
                     aria-pressed="${assignedByMe}"
                   >
+                    <span class="tag-button-topline">
+                      <span class="tag-button-badge">${escapeHtml(tag.emoji || "🏷️")}</span>
+                      <span class="tag-button-impact">${formatSignedScore(tag.scoreDelta)}</span>
+                    </span>
                     <span class="tag-button-title">${escapeHtml(tag.label)}</span>
                     <span class="tag-button-meta">${metaText}</span>
+                    <span class="tag-button-count">${assignmentText}</span>
                   </button>
                 `;
               }).join("")}
@@ -1062,6 +1079,10 @@ function formatDateLabel(date) {
 
 function formatSignedScore(score) {
   return `${score > 0 ? "+" : ""}${score.toFixed(2)}`;
+}
+
+function formatTagAssignmentCount(count) {
+  return `${count} ${count === 1 ? "person" : "people"} assigned`;
 }
 
 function clampNumber(value, minimum, maximum) {
