@@ -4,33 +4,33 @@ const SESSION_KEY = "behavior-chart-session-phone";
 const LEVELS = [
   {
     score: 5,
-    name: "Perfect Angel",
+    name: "Net Positive Aura Gain",
     emoji: "😇",
-    caption: "Top tier behavior. Halo fully intact.",
+    caption: "Top tier behavior. Aura fully intact.",
   },
   {
     score: 4,
-    name: "Good Girl",
+    name: "Found the Big Chill Within",
     emoji: "💋",
-    caption: "Strong day. A little drama, still landing well.",
+    caption: "Strong day. A little drama, but that usually hasn't hurt anyone.",
   },
   {
     score: 3,
-    name: "Make Better Choices",
+    name: "Gouse at 5am",
     emoji: "🙂",
-    caption: "Mixed signals. Needs a cleaner next round.",
+    caption: "There have been worse decisions, there have been better. Needs a cleaner next round.",
   },
   {
     score: 2,
-    name: "On Thin Ice",
+    name: "Attended a Rodiddy Party",
     emoji: "🧊",
-    caption: "Warning zone. One more swing and it gets colder.",
+    caption: "Warning zone. KSig talks.",
   },
   {
     score: 1,
-    name: "Jail",
+    name: "Paisley at Theta Formal",
     emoji: "⛓️",
-    caption: "Consequences. Locked all the way in.",
+    caption: "Consequences. You've fallen down the stairs already.",
   },
 ];
 
