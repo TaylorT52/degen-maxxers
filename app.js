@@ -124,7 +124,7 @@ async function bootstrap() {
   const firebaseConfig = getFirebaseConfig();
   if (!firebaseConfig) {
     state.setupError =
-      "Firebase is not configured yet. Copy config.example.js to config.js and add your real project values to enable Google sign-in and shared ratings.";
+      "Firebase is not configured yet. Add your Firebase web config to config.public.js to enable Google sign-in and shared ratings.";
     render();
     return;
   }

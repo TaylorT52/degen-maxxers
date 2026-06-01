@@ -32,5 +32,6 @@ The main project files are:
 - [index.html](/Users/taylortam/Downloads/code/degen-maxxers/index.html:1)
 - [styles.css](/Users/taylortam/Downloads/code/degen-maxxers/styles.css:1)
 - [app.js](/Users/taylortam/Downloads/code/degen-maxxers/app.js:1)
+- [config.public.js](/Users/taylortam/Downloads/code/degen-maxxers/config.public.js:1)
 - [config.example.js](/Users/taylortam/Downloads/code/degen-maxxers/config.example.js:1)
 - [firestore.rules](/Users/taylortam/Downloads/code/degen-maxxers/firestore.rules:1)
