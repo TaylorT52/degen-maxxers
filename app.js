@@ -243,7 +243,7 @@ async function handleGoogleSignIn() {
   render();
 
   try {
-    if (shouldUseRedirectSignIn()) {
+    if (preferredSignInMethod() === "redirect") {
       await beginRedirectSignIn(provider, "Redirecting to Google sign-in...");
       return;
     }
@@ -251,10 +251,20 @@ async function handleGoogleSignIn() {
     await signInWithPopup(auth, provider);
   } catch (error) {
     if (error?.code === "auth/popup-blocked") {
-      await beginRedirectSignIn(
-        provider,
-        "Popup blocked. Redirecting to Google sign-in instead...",
-      );
+      if (canUseRedirectSignIn()) {
+        await beginRedirectSignIn(
+          provider,
+          "Popup blocked. Redirecting to Google sign-in instead...",
+        );
+        return;
+      }
+
+      state.authNotice = {
+        tone: "error",
+        text:
+          "This browser blocked the sign-in popup, and redirect sign-in is disabled here to avoid the Safari loop. Try again in a browser that allows popups, or move auth to a same-site domain.",
+      };
+      render();
       return;
     }
 
@@ -1083,6 +1093,26 @@ function readRedirectPendingFlag() {
   } catch (_error) {
     return false;
   }
+}
+
+function preferredSignInMethod() {
+  if (!canUseRedirectSignIn()) {
+    return "popup";
+  }
+
+  return shouldUseRedirectSignIn() ? "redirect" : "popup";
+}
+
+function canUseRedirectSignIn() {
+  return authDomainMatchesCurrentHost();
+}
+
+function authDomainMatchesCurrentHost() {
+  const firebaseConfig = getFirebaseConfig();
+  const authDomain = String(firebaseConfig?.authDomain || "").trim().toLowerCase();
+  const currentHost = window.location.hostname.trim().toLowerCase();
+
+  return Boolean(authDomain) && authDomain === currentHost;
 }
 
 function shouldUseRedirectSignIn() {
