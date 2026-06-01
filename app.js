@@ -90,6 +90,8 @@ const dom = {
   entriesList: document.querySelector("#entries-list"),
 };
 
+const REDIRECT_PENDING_STORAGE_KEY = "behavior_chart_google_redirect_pending";
+
 const state = {
   setupError: "",
   authReady: false,
@@ -102,6 +104,8 @@ const state = {
   tags: {},
   authNotice: null,
   dashboardNotice: null,
+  redirectSignInPending: readRedirectPendingFlag(),
+  redirectCheckComplete: false,
   entryFormDirty: false,
   lastEntryFormKey: "",
   listeners: {
@@ -120,6 +124,13 @@ bootstrap();
 async function bootstrap() {
   dom.selectedDate.value = state.selectedDate;
   bindEvents();
+
+  if (state.redirectSignInPending) {
+    state.authNotice = {
+      tone: "info",
+      text: "Finishing Google sign-in...",
+    };
+  }
 
   const firebaseConfig = getFirebaseConfig();
   if (!firebaseConfig) {
@@ -146,9 +157,20 @@ async function bootstrap() {
         state.users = {};
         clearRealtimeSubscriptions();
         resetEntryDraft();
+
+        if (state.redirectSignInPending && !state.redirectCheckComplete) {
+          state.authNotice = {
+            tone: "info",
+            text: "Finishing Google sign-in...",
+          };
+        }
+
         render();
         return;
       }
+
+      clearRedirectPendingFlag();
+      state.redirectCheckComplete = true;
 
       try {
         await ensureUserProfile(user);
@@ -166,8 +188,24 @@ async function bootstrap() {
     });
 
     try {
-      await getRedirectResult(auth);
+      const redirectResult = await getRedirectResult(auth);
+      state.redirectCheckComplete = true;
+
+      if (redirectResult?.user) {
+        state.authNotice = {
+          tone: "info",
+          text: "Finishing Google sign-in...",
+        };
+      } else if (state.redirectSignInPending && !state.currentUser) {
+        clearRedirectPendingFlag();
+        state.authNotice = {
+          tone: "error",
+          text: "Google sign-in did not finish on this device. Try again.",
+        };
+      }
     } catch (error) {
+      clearRedirectPendingFlag();
+      state.redirectCheckComplete = true;
       state.authReady = true;
       state.authNotice = {
         tone: "error",
@@ -194,7 +232,7 @@ function bindEvents() {
 }
 
 async function handleGoogleSignIn() {
-  if (!auth) {
+  if (!auth || state.redirectSignInPending) {
     return;
   }
 
@@ -206,19 +244,17 @@ async function handleGoogleSignIn() {
 
   try {
     if (shouldUseRedirectSignIn()) {
-      await signInWithRedirect(auth, provider);
+      await beginRedirectSignIn(provider, "Redirecting to Google sign-in...");
       return;
     }
 
     await signInWithPopup(auth, provider);
   } catch (error) {
     if (error?.code === "auth/popup-blocked") {
-      state.authNotice = {
-        tone: "info",
-        text: "Popup blocked. Redirecting to Google sign-in instead...",
-      };
-      render();
-      await signInWithRedirect(auth, provider);
+      await beginRedirectSignIn(
+        provider,
+        "Popup blocked. Redirecting to Google sign-in instead...",
+      );
       return;
     }
 
@@ -615,7 +651,10 @@ function render() {
         },
   );
 
-  setElementsDisabled([dom.googleSignInButton], !configured || !state.authReady);
+  setElementsDisabled(
+    [dom.googleSignInButton],
+    !configured || !state.authReady || state.redirectSignInPending,
+  );
 
   if (!loggedIn) {
     return;
@@ -999,6 +1038,51 @@ function setElementsDisabled(elements, disabled) {
       element.disabled = disabled;
     }
   });
+}
+
+async function beginRedirectSignIn(provider, noticeText) {
+  markRedirectPendingFlag();
+  state.authNotice = {
+    tone: "info",
+    text: noticeText,
+  };
+  render();
+
+  try {
+    await signInWithRedirect(auth, provider);
+  } catch (error) {
+    clearRedirectPendingFlag();
+    throw error;
+  }
+}
+
+function markRedirectPendingFlag() {
+  state.redirectSignInPending = true;
+  state.redirectCheckComplete = false;
+
+  try {
+    window.sessionStorage.setItem(REDIRECT_PENDING_STORAGE_KEY, "1");
+  } catch (_error) {
+    // Ignore storage failures and rely on in-memory state for this page load.
+  }
+}
+
+function clearRedirectPendingFlag() {
+  state.redirectSignInPending = false;
+
+  try {
+    window.sessionStorage.removeItem(REDIRECT_PENDING_STORAGE_KEY);
+  } catch (_error) {
+    // Ignore storage failures and keep moving through auth state changes.
+  }
+}
+
+function readRedirectPendingFlag() {
+  try {
+    return window.sessionStorage.getItem(REDIRECT_PENDING_STORAGE_KEY) === "1";
+  } catch (_error) {
+    return false;
+  }
 }
 
 function shouldUseRedirectSignIn() {
